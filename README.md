@@ -20,6 +20,8 @@
 ```
 常亮小助手/
 ├── pubspec.yaml                         # Flutter 工程描述（应用名 keep_screen）
+├── pubspec.lock                         # 依赖锁定（保证可复现构建）
+├── .metadata                           # Flutter 工程标识
 ├── build.cmd                            # ★★ 双击即可构建（推荐入口）
 ├── 一键构建.ps1                         # ★ 一键构建脚本（被 build.cmd 调用）
 ├── LICENSE                              # MIT 许可证
@@ -41,7 +43,7 @@
         └── drawable/{launch_background.xml, ic_keep.xml}
 ```
 
-> 说明：本仓库包含**全部应用层自定义源码**，但未包含 Flutter 自动生成的 **Gradle 工程配置**（gradle wrapper、`build.gradle`、`settings.gradle`、mipmap 启动图标、`MainApplication` 等）。构建脚本会在你本机用 `flutter create` 一次性生成这些骨架，再用仓库源码覆盖——无需你手动处理。
+> 说明：本仓库是**自包含工程**，已包含完整的 Flutter + Gradle 工程骨架（Gradle Wrapper、`build.gradle.kts`、`settings.gradle.kts`、启动图标 `mipmap-*` 等）。克隆到**纯英文路径**后，直接 `flutter build apk --release` 即可构建，无需先跑 `flutter create`；`一键构建.ps1` 仍可作为带国内镜像加速的一键入口。
 
 ---
 
