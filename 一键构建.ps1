@@ -1,8 +1,8 @@
 ﻿# ============================================================
-# 常亮小助手 - 一键整合 + 构建 Release APK
-# 适用：已安装 Flutter 3.x + Android SDK（含 JDK 17）的 Windows 电脑
-# 推荐在本机“已打开的 PowerShell 窗口”里执行本脚本：
-#   & "D:\WYH-副\常亮小助手\一键构建.ps1"
+# 常亮小助手 - 一键构建 Release APK（开源版，无个人路径依赖）
+# 适用：已安装 Flutter 3.x + Android SDK（含 JDK 17）的电脑
+# 用法：双击本目录的 build.cmd，或在 PowerShell 里执行：
+#   & ".\一键构建.ps1"
 # 若被策略拦截，先执行一次（仅需一次）：
 #   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # ============================================================
@@ -18,55 +18,51 @@ function Pause-Exit {
 }
 
 try {
-    # 1) 把 Flutter 加入当前会话 PATH（如你本机路径不同，请改这一行）
-    $flutterDir = "C:\Users\wyh17\flutter\bin"
-    if ($env:PATH -notlike "*$flutterDir*") { $env:PATH += ";$flutterDir" }
+    # 1) 定位 Flutter：优先用 PATH 里已有的，其次尝试常见安装位置
+    if (-not (Get-Command flutter -ErrorAction SilentlyContinue)) {
+        $candidates = @(
+            "$env:USERPROFILE\flutter\bin",
+            "$env:USERPROFILE\fvm\default\bin",
+            "$env:LOCALAPPDATA\flutter\bin",
+            "C:\flutter\bin",
+            "C:\src\flutter\bin"
+        )
+        foreach ($c in $candidates) { if (Test-Path $c) { $env:PATH += ";$c"; break } }
+    }
 
-    # 2) 确认 flutter 可用
     Write-Host ">>> 检查 Flutter ..." -ForegroundColor Cyan
     $ver = & flutter --version 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Pause-Exit "!!! 找不到 flutter 命令。请确认 C:\Users\wyh17\flutter\bin 存在，或修改脚本里的 flutterDir 路径。"
+        Pause-Exit "!!! 找不到 flutter 命令。请先安装 Flutter 并加入 PATH，或修改脚本顶部的 candidates 路径。"
         exit 1
     }
     Write-Host ($ver | Select-Object -First 2)
 
-    # 3) 路径
-    #    ⚠️ 关键：Windows 下 AGP/Gradle 会拒绝「含非 ASCII(中文)字符」的工程路径，
-    #    报 "Your project path contains non-ASCII characters" 直接构建失败。
-    #    所以：构建工程放纯英文目录，最终 APK 依然复制到中文产物目录。
-    $productDir = "D:\WYH-副\常亮小助手"      # 产物目录（可含中文，只用来放源码/文档/APK）
-    $parentDir  = "D:\WYH_build"              # 构建工作区（必须是纯英文！）
-    $projDir    = "$parentDir\keep_screen_app"
+    # 2) 源码目录 = 本脚本所在目录（即仓库根目录）
+    $productDir = $PSScriptRoot
 
-    if (-not (Test-Path $productDir)) {
-        Pause-Exit "!!! 产品目录不存在：$productDir"
-        exit 1
-    }
-
-    if ($parentDir -match '[^\x00-\x7F]') {
-        Pause-Exit "!!! 构建路径含中文/非英文字符：$parentDir`n    请把本脚本里的 `$parentDir 改成纯英文路径（例如 D:\WYH_build）后再运行。"
-        exit 1
-    }
-    if (-not (Test-Path $parentDir)) { New-Item -ItemType Directory -Path $parentDir -Force | Out-Null }
-
-    if (Test-Path "D:\WYH-副\keep_screen_app") {
-        Write-Host "    提示：旧的中文路径工程 D:\WYH-副\keep_screen_app 已废弃，可手动删除释放空间。" -ForegroundColor DarkYellow
-    }
+    # 3) 构建工作区：统一放到系统临时目录下的纯英文路径。
+    #    原因：Windows 下 AGP 会拒绝含中文/非 ASCII 的工程路径
+    #    （报 Your project path contains non-ASCII characters）。
+    #    Gradle 发行包与依赖缓存在用户主目录(~/.gradle、~/.pub-cache)，与工程目录无关，
+    #    所以用临时目录不会导致每次重新下载。
+    $buildRoot = Join-Path $env:TEMP "keep_screen_build"
+    $projDir   = Join-Path $buildRoot "keep_screen_app"
+    if (-not (Test-Path $buildRoot)) { New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null }
 
     # 4) 生成标准 Flutter 安卓工程骨架
-    #    --org + --project-name 组合 => applicationId/namespace = com.keepscreen.app
+    #    --org + --project-name => applicationId/namespace = com.keepscreen.app
     #    必须与源码包名 com.keepscreen.app 完全一致，否则 R 类与类名解析失败
-    if (-not (Test-Path $projDir)) {
-        Write-Host ">>> [1/6] flutter create 生成工程 ..." -ForegroundColor Cyan
-        Set-Location $parentDir
+    if (Test-Path "$projDir\android\app\build.gradle.kts") {
+        Write-Host ">>> [1/6] 工程已就绪，跳过 flutter create" -ForegroundColor DarkGray
+    } else {
+        Write-Host ">>> [1/6] flutter create 生成工程骨架 ..." -ForegroundColor Cyan
+        Set-Location $buildRoot
         & flutter create --org com.keepscreen --project-name app keep_screen_app
         if ($LASTEXITCODE -ne 0) { Pause-Exit "!!! flutter create 失败，见上方错误。"; exit 1 }
-    } else {
-        Write-Host ">>> [1/6] 工程已存在，跳过 flutter create（如需重建请先删除 $projDir）" -ForegroundColor Yellow
     }
 
-    # 5) 用交付源码覆盖（只覆盖我们作者文件，保留 Flutter 生成的 mipmap 图标与 MainApplication）
+    # 5) 用仓库源码覆盖（只覆盖作者文件，保留 Flutter 生成的 mipmap 图标与 MainApplication）
     Write-Host ">>> [2/6] 覆盖源码 ..." -ForegroundColor Cyan
     Copy-Item "$productDir\lib\main.dart" "$projDir\lib\main.dart" -Force
     Copy-Item "$productDir\android\app\src\main\AndroidManifest.xml" "$projDir\android\app\src\main\AndroidManifest.xml" -Force
@@ -74,7 +70,7 @@ try {
     $srcK = "$productDir\android\app\src\main\kotlin\com\keepscreen\app"
     $dstK = "$projDir\android\app\src\main\kotlin\com\keepscreen\app"
     if (-not (Test-Path $dstK)) { New-Item -ItemType Directory -Path $dstK -Force | Out-Null }
-    # V2 起新增了 KeepEvents.kt / PowerEventReceiver.kt，直接按目录整体同步所有 Kotlin 文件，避免漏拷
+    # 直接按目录整体同步所有 Kotlin 文件，新增 .kt 也不会漏拷
     Copy-Item "$srcK\*.kt" "$dstK" -Force
 
     Copy-Item "$productDir\android\app\src\main\res\values\styles.xml"          "$projDir\android\app\src\main\res\values\styles.xml" -Force
@@ -83,8 +79,8 @@ try {
     Copy-Item "$productDir\android\app\src\main\res\drawable\ic_keep.xml"       "$projDir\android\app\src\main\res\drawable\ic_keep.xml" -Force
 
     # 6) 【加速关键】把 Gradle 下载源与 Maven 仓库切到国内镜像
-    #    官方 services.gradle.org 在国内实测仅 ~20KB/s，gradle-9.3.1-all.zip(约230MB) 要下 2 小时以上；
-    #    腾讯云镜像实测 6MB/s，且改用体积减半的 -bin 包，通常 30 秒左右下完。
+    #    官方 services.gradle.org 在国内实测仅 ~20KB/s；腾讯云镜像实测 6MB/s，
+    #    且改用体积减半的 -bin 包。镜像不可用时依赖会自动回退官方源。
     Write-Host ">>> [3/6] 配置国内镜像加速 ..." -ForegroundColor Cyan
 
     $wrapperFile = "$projDir\android\gradle\wrapper\gradle-wrapper.properties"
@@ -124,12 +120,12 @@ try {
     & flutter pub get
     if ($LASTEXITCODE -ne 0) { Pause-Exit "!!! flutter pub get 失败，见上方错误。"; exit 1 }
 
-    # 7) 构建 Release APK
+    # 8) 构建 Release APK
     Write-Host ">>> [5/6] flutter build apk --release（首次会下载 Gradle 与依赖，走国内镜像通常 1-5 分钟）..." -ForegroundColor Cyan
     & flutter build apk --release
     if ($LASTEXITCODE -ne 0) { Pause-Exit "!!! flutter build apk 失败，见上方错误。常见：缺 Android SDK / JDK / 协议未接受，先跑 flutter doctor -v 排查。"; exit 1 }
 
-    # 8) 复制到产品目录
+    # 9) 复制到源码目录（该 APK 已被 .gitignore 忽略，不会误提交）
     $apk = "build\app\outputs\flutter-apk\app-release.apk"
     if (Test-Path $apk) {
         Copy-Item $apk "$productDir\常亮小助手-release.apk" -Force
@@ -140,8 +136,8 @@ try {
     }
 
     Write-Host ""
-    Write-Host "后续：把 APK 传到手机安装；首次开启常亮会跳设置页，请允许“显示在其他应用上”；" -ForegroundColor White
-    Write-Host "      并在系统设置里给本 App“关闭电池优化 + 允许后台运行”，防止被国产 ROM 杀后台。" -ForegroundColor White
+    Write-Host "后续：把 APK 传到手机安装；首次启动会引导授予权限（电池优化白名单、悬浮窗为必选）；" -ForegroundColor White
+    Write-Host "      并在系统设置里给本 App 允许后台运行，防止被国产 ROM 杀后台。" -ForegroundColor White
     Pause-Exit
 }
 catch {
