@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 与 Flutter 主背景 0xFF070B1E 尽量一致，避免启动时黑框/色差 -->
+    <item android:drawable="#070B1E" />
+</layer-list>

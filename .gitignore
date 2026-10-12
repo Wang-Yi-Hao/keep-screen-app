@@ -1,0 +1,29 @@
+# —— 构建产物 / 本地包（切勿提交）——
+*.apk
+*.aab
+/build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# —— Android ——
+.gradle/
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/key.properties
+**/android/**/gradle-wrapper.jar
+*.jks
+*.keystore
+
+# —— IDE / OS ——
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# —— 日志 ——
+*.log
