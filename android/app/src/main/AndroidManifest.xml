@@ -21,6 +21,10 @@
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="PackageManagerGetInstalledPackages" />
+    <!-- 定时降低亮度（防烧屏）：修改系统背光所需（需引导用户在设置里授予“修改系统设置”） -->
+    <uses-permission
+        android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <application
         android:label="常亮小助手"

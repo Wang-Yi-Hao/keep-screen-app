@@ -11,7 +11,8 @@
 - **充电时常亮**：插电即亮、拔电即灭；静态广播接收，App 退到后台也响应。
 - **指定 App 前台时常亮**：选定某个 App，仅当它处于前台时保持常亮（内置应用选择器，含图标）。
 - **多原因统一管理**：任一原因成立即常亮，全部撤销则自动停止服务，互不冲突。
-- **首次启动权限引导**：电池优化白名单、悬浮窗为必选；使用情况访问为可选（指定 App 功能需要）。
+- **首次启动权限引导（全部可选）**：列出电池优化白名单、悬浮窗、使用情况访问三项，均可跳过；不授予也能进入应用并使用基础常亮，权限可稍后在设置中开启。
+- **定时降低亮度（防烧屏）**：开关 + 1–30 分钟下拉，常亮持续到点自动调暗系统背光（需授予“修改系统设置”权限）；关闭开关或取消常亮立即恢复原亮度。
 
 ---
 
@@ -22,8 +23,9 @@
 ├── pubspec.yaml                         # Flutter 工程描述（应用名 keep_screen）
 ├── pubspec.lock                         # 依赖锁定（保证可复现构建）
 ├── .metadata                           # Flutter 工程标识
-├── build.cmd                            # ★★ 双击即可构建（推荐入口）
-├── 一键构建.ps1                         # ★ 一键构建脚本（被 build.cmd 调用）
+├── build.cmd                            # ★★ 双击构建：默认执行「真机」脚本
+├── 一键构建（真机）.ps1                  # ★ 构建 Release 包（真机安装 / 发布用）
+├── 一键构建（测试）.ps1                  # ★ 构建 Debug 包（快速测试用）
 ├── LICENSE                              # MIT 许可证
 ├── .gitignore                           # 已忽略 APK / build / 本地配置等
 ├── 需求规格说明书.md                     # 需求文档
@@ -43,7 +45,7 @@
         └── drawable/{launch_background.xml, ic_keep.xml}
 ```
 
-> 说明：本仓库是**自包含工程**，已包含完整的 Flutter + Gradle 工程骨架（Gradle Wrapper、`build.gradle.kts`、`settings.gradle.kts`、启动图标 `mipmap-*` 等）。克隆到**纯英文路径**后，直接 `flutter build apk --release` 即可构建，无需先跑 `flutter create`；`一键构建.ps1` 仍可作为带国内镜像加速的一键入口。
+> 说明：本仓库是**自包含工程**，已包含完整的 Flutter + Gradle 工程骨架（Gradle Wrapper、`build.gradle.kts`、`settings.gradle.kts`、启动图标 `mipmap-*` 等）。克隆到**纯英文路径**后，直接 `flutter build apk --release` 即可构建，无需先跑 `flutter create`；`一键构建（真机）.ps1` / `一键构建（测试）.ps1` 仍可作为带国内镜像加速的一键入口。
 
 ---
 
@@ -70,14 +72,22 @@ flutter doctor -v
 
 本目录已附脚本，它会自动：定位 Flutter → `flutter create` 生成工程骨架 → 覆盖源码 → 切国内镜像 → `pub get` → 构建 APK → 复制成品到仓库根目录。
 
-- **A-1 双击运行（最省事）**：双击本目录下的 **`build.cmd`**。它会以 `-ExecutionPolicy Bypass` 调用脚本，不受执行策略限制，出错窗口也会停留显示。
-- **A-2 在 PowerShell 里运行**：
+- **A-1 双击运行（默认构建真机/发布版）**：双击本目录下的 **`build.cmd`**。它会以 `-ExecutionPolicy Bypass` 调用 `一键构建（真机）.ps1`，不受执行策略限制，出错窗口也会停留显示。
+- **A-2 构建真机/发布版**：
   ```powershell
-  & ".\一键构建.ps1"
+  & ".\一键构建（真机）.ps1"
+  ```
+- **A-3 构建测试/Debug 版**：
+  ```powershell
+  & ".\一键构建（测试）.ps1"
   ```
   > 若提示脚本被禁用，先执行一次：`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`（输 `Y` 确认）。
 
-跑完 APK 落在仓库根目录的 `常亮小助手-release.apk`（已被 `.gitignore` 忽略）。
+跑完 APK 落在仓库根目录：
+- 默认**拆分 ABI 小包**：`常亮小助手-arm64-v8a-release.apk`（主流机型）、`常亮小助手-armeabi-v7a-release.apk`（老旧设备）、`常亮小助手-x86_64-release.apk`（模拟器），单包约 15MB；手机按架构选一个安装即可。
+- 如需包含全部架构的**胖包**单文件（约 45MB），把脚本顶部的 `$BuildFatApk` 改为 `$true` 再跑，会生成 `常亮小助手-release.apk`。
+
+> 所有 APK 均已被 `.gitignore` 忽略，不会误提交。
 
 > ⚠️ **构建工程必须放在纯英文路径**：Windows 下 AGP 会拒绝含中文的工程路径（报 `Your project path contains non-ASCII characters`）。脚本已自动把构建目录设到系统临时目录下的纯英文路径，无需你操心。
 > Gradle 发行包与依赖缓存在用户主目录（`~/.gradle`、`~/.pub-cache`），与工程目录无关，因此用临时目录不会导致每次重新下载。
@@ -120,10 +130,11 @@ $c=[regex]::Replace($c,'https\\://services\.gradle\.org/distributions/gradle-([\
 # 4) 拉依赖并构建 APK
 cd $build
 flutter pub get
-flutter build apk --release
+#    默认拆分 ABI 出小包（单包约 15MB）；要出含全部架构的胖包用：flutter build apk --release
+flutter build apk --release --split-per-abi
 
-# 5) 复制成品 APK 到仓库目录
-Copy-Item "build\app\outputs\flutter-apk\app-release.apk" "$src\常亮小助手-release.apk" -Force
+# 5) 复制成品 APK 到仓库目录（拆分小包示例，按需复制对应架构）
+Copy-Item "build\app\outputs\flutter-apk\app-arm64-v8a-release.apk" "$src\常亮小助手-arm64-v8a-release.apk" -Force
 ```
 
 ### 方式 C · 连真机直接运行（跳过 APK，最快看到效果）
@@ -142,7 +153,7 @@ flutter run --release  # 编译并直接装到手机运行
 ## 四、安装与测试
 
 1. 把 `常亮小助手-release.apk` 拷到手机，点击安装（允许“未知来源”）。
-2. 首次打开会进入**权限引导页**：电池优化白名单、悬浮窗为**必选**；使用情况访问为可选（“指定 App 前台时常亮”需要）。
+2. 首次打开会进入**权限引导页**：列出电池优化白名单、悬浮窗、使用情况访问三项，均**可跳过**；不授予也能进入应用并使用基础常亮，需要时在设置中再开启。悬浮窗授权后 App 退到后台仍可常亮；未授权则仅前台常亮。
 3. 进入后点中央发光开关。
 4. 验证：
    - 前台：屏幕一直亮，状态显示“屏幕常亮中”。
@@ -165,10 +176,10 @@ flutter run --release  # 编译并直接装到手机运行
 ## 六、已知限制与边界
 
 - **仅支持安卓平台**：本工具专注于安卓系统的全局常亮能力，未做其他平台的适配。
-- **后台常亮依赖悬浮窗权限**：Android 10+ 需用户手动授权“显示在其他应用上”；若被撤销，App 内开启时会重新引导授予。
+- **后台常亮依赖悬浮窗权限（可选）**：Android 10+ 需用户手动授权“显示在其他应用上”；未授权时仅前台常亮，App 内开启主开关会有提示，可在设置中再开启。
 - **烧屏/掉电**：长期常亮有风险，建议用完即关；通知栏常驻可随时关闭。
-- **签名**：默认 `flutter build apk --release` 用调试证书签名，自己安装没问题，但**不能上应用商店**。正式分发需用自有 keystore（在 `android/app/build.gradle.kts` 配 `signingConfigs`）。
-- **体积**：APK 约 40MB，因为 3 套 CPU 架构的 `libflutter.so` 全打进去了。只发真机可只保留 arm 架构降到约 20MB：`flutter build apk --release --target-platform android-arm64`。
+- **签名（正式分发）**：仓库已内置发布签名配置。当 `android/key.properties` + `android/release-key.jks` 存在时，自动用**你的自有密钥**签名（推荐，跨机器构建签名一致、用户可平滑更新）；缺失时回退到调试证书（仅本地自测、不能上应用商店）。生成密钥与填写方法见 `android/key.properties.example`。注意：调试证书签名的包**不能上应用商店**。
+- **体积**：一键脚本默认 `--split-per-abi` 拆分 ABI，单包约 15MB（主流机型选 `arm64-v8a`）。若需要包含全部架构的胖包，把脚本顶部 `$BuildFatApk` 改为 `$true`，单文件约 45MB。
 
 ---
 

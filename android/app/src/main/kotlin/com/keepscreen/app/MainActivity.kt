@@ -36,6 +36,10 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.keepscreen.app/keep"
     private val EVENTS = "com.keepscreen.app/events"
 
+    // 定时降亮度所需的“修改系统设置”权限未授予时，记录意图待授权返回后补发
+    private var pendingDimEnabled = false
+    private var pendingDimMinutes = 5
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -105,6 +109,11 @@ class MainActivity : FlutterActivity() {
                         // 悬浮窗已改为首次必选权限，不再提供运行时开关
                         result.success(true)
                     }
+                    "setDimMode" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        val minutes = call.argument<Int>("minutes") ?: 5
+                        result.success(applyDimMode(enabled, minutes))
+                    }
                     "markGuideDone" -> {
                         getSharedPreferences("keep_prefs", Context.MODE_PRIVATE)
                             .edit()
@@ -159,6 +168,9 @@ class MainActivity : FlutterActivity() {
                 "targetPackage" to (prefs.getString("targetPackage", "") ?: ""),
                 "timerMinutes" to prefs.getInt("timerMinutes", 0),
                 "remainingSeconds" to -1,
+                "dimEnabled" to prefs.getBoolean("dimEnabled", false),
+                "dimMinutes" to prefs.getInt("dimMinutes", 5),
+                "dimmed" to false,
                 "batteryOpt" to isIgnoringBatteryOptimizations(),
                 "guideDone" to prefs.getBoolean("guideDone", false),
             )
@@ -255,6 +267,52 @@ class MainActivity : FlutterActivity() {
             Base64.encodeToString(bytes, Base64.NO_WRAP)
         } catch (e: Exception) {
             null
+        }
+    }
+
+    // —— 定时降低亮度：WRITE_SETTINGS 权限处理 ——
+
+    /** 应用降亮度配置；缺少 WRITE_SETTINGS 权限时引导授权并标记待补发 */
+    private fun applyDimMode(enabled: Boolean, minutes: Int): String {
+        if (enabled && !canWriteSettings()) {
+            pendingDimEnabled = true
+            pendingDimMinutes = minutes
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")),
+                )
+            } catch (_: Exception) {
+            }
+            return "need_permission"
+        }
+        pendingDimEnabled = false
+        launchKeepService(
+            cmd("CMD_DIM_CONFIG").apply {
+                putExtra("enabled", enabled)
+                putExtra("minutes", minutes)
+            },
+        )
+        return "ok"
+    }
+
+    private fun canWriteSettings(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.System.canWrite(this)
+        } else {
+            true
+        }
+
+    override fun onResume() {
+        super.onResume()
+        if (pendingDimEnabled && canWriteSettings()) {
+            pendingDimEnabled = false
+            launchKeepService(
+                cmd("CMD_DIM_CONFIG").apply {
+                    putExtra("enabled", true)
+                    putExtra("minutes", pendingDimMinutes)
+                },
+            )
+            KeepScreenService.instance?.pushState()
         }
     }
 }

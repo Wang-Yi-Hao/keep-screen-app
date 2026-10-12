@@ -1,0 +1,16 @@
+# ============================================================
+# 发布签名配置模板（本文件不会被构建读取，也不会被提交）
+# 用法：把本文件复制为同目录下的 key.properties，并填入你自己的值。
+#       key.properties 与 release-key.jks 已被 .gitignore 忽略，切勿提交。
+# ============================================================
+
+# ① 先生成密钥库（在你的电脑上执行一次，路径请改成你自己的工程位置）：
+# keytool -genkey -v -keystore "D:\WYH-副\常亮小助手\android\release-key.jks" -keyalg RSA -keysize 2048 -validity 10000 -alias keepkey
+#
+# ② 生成时会让你设置 storePassword 与 keyPassword，以及姓名/单位等，记下密码。
+#    下面的 storeFile 写成相对路径：相对 android/app 目录，故 ../release-key.jks 指向 android/release-key.jks。
+
+storePassword=改成你的store密码
+keyPassword=改成你的key密码
+keyAlias=keepkey
+storeFile=../release-key.jks

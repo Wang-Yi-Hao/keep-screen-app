@@ -1,8 +1,8 @@
 ﻿# ============================================================
-# 常亮小助手 - 一键构建 Release APK（开源版，无个人路径依赖）
+# 常亮小助手 - 一键构建 Debug APK（测试版）
 # 适用：已安装 Flutter 3.x + Android SDK（含 JDK 17）的电脑
-# 用法：双击本目录的 build.cmd，或在 PowerShell 里执行：
-#   & ".\一键构建.ps1"
+# 用法：在 PowerShell 里执行：
+#   & ".\一键构建（测试）.ps1"
 # 若被策略拦截，先执行一次（仅需一次）：
 #   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # ============================================================
@@ -54,16 +54,16 @@ try {
     #    --org + --project-name => applicationId/namespace = com.keepscreen.app
     #    必须与源码包名 com.keepscreen.app 完全一致，否则 R 类与类名解析失败
     if (Test-Path "$projDir\android\app\build.gradle.kts") {
-        Write-Host ">>> [1/6] 工程已就绪，跳过 flutter create" -ForegroundColor DarkGray
+        Write-Host ">>> [1/5] 工程已就绪，跳过 flutter create" -ForegroundColor DarkGray
     } else {
-        Write-Host ">>> [1/6] flutter create 生成工程骨架 ..." -ForegroundColor Cyan
+        Write-Host ">>> [1/5] flutter create 生成工程骨架 ..." -ForegroundColor Cyan
         Set-Location $buildRoot
         & flutter create --org com.keepscreen --project-name app keep_screen_app
         if ($LASTEXITCODE -ne 0) { Pause-Exit "!!! flutter create 失败，见上方错误。"; exit 1 }
     }
 
     # 5) 用仓库源码覆盖（只覆盖作者文件，保留 Flutter 生成的 mipmap 图标与 MainApplication）
-    Write-Host ">>> [2/6] 覆盖源码 ..." -ForegroundColor Cyan
+    Write-Host ">>> [2/5] 覆盖源码 ..." -ForegroundColor Cyan
     Copy-Item "$productDir\lib\main.dart" "$projDir\lib\main.dart" -Force
     Copy-Item "$productDir\android\app\src\main\AndroidManifest.xml" "$projDir\android\app\src\main\AndroidManifest.xml" -Force
 
@@ -78,10 +78,18 @@ try {
     Copy-Item "$productDir\android\app\src\main\res\drawable\launch_background.xml" "$projDir\android\app\src\main\res\drawable\launch_background.xml" -Force
     Copy-Item "$productDir\android\app\src\main\res\drawable\ic_keep.xml"       "$projDir\android\app\src\main\res\drawable\ic_keep.xml" -Force
 
+    # 5.1) 同步 Gradle 工程配置（含国内镜像、wrapper 版本）
+    Copy-Item "$productDir\android\build.gradle.kts"     "$projDir\android\build.gradle.kts" -Force
+    Copy-Item "$productDir\android\settings.gradle.kts"  "$projDir\android\settings.gradle.kts" -Force
+    Copy-Item "$productDir\android\app\build.gradle.kts" "$projDir\android\app\build.gradle.kts" -Force
+    Copy-Item "$productDir\android\gradle.properties"     "$projDir\android\gradle.properties" -Force
+    Copy-Item "$productDir\android\gradlew"               "$projDir\android\gradlew" -Force
+    Copy-Item "$productDir\android\gradlew.bat"           "$projDir\android\gradlew.bat" -Force
+    Copy-Item "$productDir\android\gradle\wrapper\gradle-wrapper.properties" "$projDir\android\gradle\wrapper\gradle-wrapper.properties" -Force
+    # Debug 包不需要 release 签名 key.properties
+
     # 6) 【加速关键】把 Gradle 下载源与 Maven 仓库切到国内镜像
-    #    官方 services.gradle.org 在国内实测仅 ~20KB/s；腾讯云镜像实测 6MB/s，
-    #    且改用体积减半的 -bin 包。镜像不可用时依赖会自动回退官方源。
-    Write-Host ">>> [3/6] 配置国内镜像加速 ..." -ForegroundColor Cyan
+    Write-Host ">>> [3/5] 配置国内镜像加速 ..." -ForegroundColor Cyan
 
     $wrapperFile = "$projDir\android\gradle\wrapper\gradle-wrapper.properties"
     if (Test-Path $wrapperFile) {
@@ -116,28 +124,27 @@ try {
 
     # 7) 拉取依赖
     Set-Location $projDir
-    Write-Host ">>> [4/6] flutter pub get ..." -ForegroundColor Cyan
+    Write-Host ">>> [4/5] flutter pub get ..." -ForegroundColor Cyan
     & flutter pub get
     if ($LASTEXITCODE -ne 0) { Pause-Exit "!!! flutter pub get 失败，见上方错误。"; exit 1 }
 
-    # 8) 构建 Release APK
-    Write-Host ">>> [5/6] flutter build apk --release（首次会下载 Gradle 与依赖，走国内镜像通常 1-5 分钟）..." -ForegroundColor Cyan
-    & flutter build apk --release
+    # 8) 构建 Debug APK（编译更快，带调试信息，适合本地测试）
+    Write-Host ">>> [5/5] flutter build apk --debug ..." -ForegroundColor Cyan
+    & flutter build apk --debug
     if ($LASTEXITCODE -ne 0) { Pause-Exit "!!! flutter build apk 失败，见上方错误。常见：缺 Android SDK / JDK / 协议未接受，先跑 flutter doctor -v 排查。"; exit 1 }
 
-    # 9) 复制到源码目录（该 APK 已被 .gitignore 忽略，不会误提交）
-    $apk = "build\app\outputs\flutter-apk\app-release.apk"
+    # 9) 复制产物到源码目录（APK 已被 .gitignore 忽略，不会误提交）
+    $apk = "build\app\outputs\flutter-apk\app-debug.apk"
     if (Test-Path $apk) {
-        Copy-Item $apk "$productDir\常亮小助手-release.apk" -Force
-        Write-Host ">>> [6/6] 完成！APK 位于：$productDir\常亮小助手-release.apk" -ForegroundColor Green
+        Copy-Item $apk "$productDir\常亮小助手-debug.apk" -Force
+        Write-Host ">>> 完成！测试包位于：$productDir\常亮小助手-debug.apk" -ForegroundColor Green
     } else {
         Pause-Exit "!!! 未找到 APK，构建可能失败，请查看上方错误。"
         exit 1
     }
 
     Write-Host ""
-    Write-Host "后续：把 APK 传到手机安装；首次启动会引导授予权限（电池优化白名单、悬浮窗为必选）；" -ForegroundColor White
-    Write-Host "      并在系统设置里给本 App 允许后台运行，防止被国产 ROM 杀后台。" -ForegroundColor White
+    Write-Host "后续：把 APK 传到手机/模拟器安装即可测试。" -ForegroundColor White
     Pause-Exit
 }
 catch {

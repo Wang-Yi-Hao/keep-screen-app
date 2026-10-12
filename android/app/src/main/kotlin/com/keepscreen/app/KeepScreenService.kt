@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 
 /**
@@ -48,6 +49,14 @@ class KeepScreenService : Service() {
     private var timerExpiry = 0L
     private var currentCharging = false
 
+    // —— 定时降低亮度（防烧屏）——
+    private var dimEnabled = false
+    private var dimMinutes = 5
+    private val dimTargetRatio = 0.25f // 到点降到当前亮度的 25%
+    private var originalBrightness = -1
+    private var dimExpiry = 0L
+    private var dimRunnable: Runnable? = null
+
     private val handler = Handler(Looper.getMainLooper())
     private var timerRunnable: Runnable? = null
     private var fgRunnable: Runnable? = null
@@ -63,6 +72,8 @@ class KeepScreenService : Service() {
         foregroundModeEnabled = prefs.getBoolean("foregroundMode", false)
         targetPackage = prefs.getString("targetPackage", "") ?: ""
         timerMinutes = prefs.getInt("timerMinutes", 0)
+        dimEnabled = prefs.getBoolean("dimEnabled", false)
+        dimMinutes = prefs.getInt("dimMinutes", 5)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -105,6 +116,12 @@ class KeepScreenService : Service() {
                 savePrefs()
                 evaluateForeground()
             }
+            "CMD_DIM_CONFIG" -> {
+                dimEnabled = intent.getBooleanExtra("enabled", false)
+                dimMinutes = intent.getIntExtra("minutes", 5)
+                saveDimPrefs()
+                onDimConfigChanged()
+            }
         }
         pushState()
         return START_STICKY
@@ -113,6 +130,8 @@ class KeepScreenService : Service() {
     override fun onDestroy() {
         stopFgPoller()
         cancelTimer()
+        cancelDimTimer()
+        restoreBrightness()
         overlay?.hide()
         overlay = null
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -154,6 +173,7 @@ class KeepScreenService : Service() {
         }
         // 刷新常驻通知标题（体现当前常亮原因）
         if (reasons.isNotEmpty()) refreshNotification()
+        onActiveChanged(reasons.isNotEmpty())
         pushState()
     }
 
@@ -180,6 +200,98 @@ class KeepScreenService : Service() {
         removeReason("manual")
         cancelTimer()
         pushState()
+    }
+
+    // —————————————————————— 定时降低亮度（防烧屏） ——————————————————————
+
+    /** 常亮状态变化：进入常亮则按配置启动降亮度计时；退出常亮立即恢复亮度 */
+    private fun onActiveChanged(active: Boolean) {
+        if (active && dimEnabled) {
+            ensureDimTimer()
+        } else {
+            cancelDimTimer()
+            restoreBrightness()
+        }
+    }
+
+    /** 降亮度配置变化：变更分钟数需重启计时；关闭则立即恢复亮度 */
+    private fun onDimConfigChanged() {
+        if (dimEnabled && reasons.isNotEmpty()) {
+            cancelDimTimer()
+            startDimTimer()
+        } else {
+            cancelDimTimer()
+            restoreBrightness()
+        }
+    }
+
+    private fun ensureDimTimer() {
+        if (dimRunnable == null) startDimTimer()
+    }
+
+    private fun startDimTimer() {
+        cancelDimTimer()
+        if (dimEnabled && reasons.isNotEmpty() && dimMinutes > 0) {
+            val delay = dimMinutes * 60_000L
+            dimExpiry = System.currentTimeMillis() + delay
+            dimRunnable = Runnable { applyDim() }
+            handler.postDelayed(dimRunnable!!, delay)
+        }
+    }
+
+    private fun cancelDimTimer() {
+        dimRunnable?.let { handler.removeCallbacks(it) }
+        dimRunnable = null
+        dimExpiry = 0
+    }
+
+    /** 到点：把系统背光降到较低亮度（防烧屏）。降前记录原亮度以便恢复 */
+    private fun applyDim() {
+        if (!canWriteSettings()) return
+        if (originalBrightness < 0) originalBrightness = getCurrentBrightness()
+        val target = (originalBrightness * dimTargetRatio).toInt().coerceAtLeast(1)
+        setBrightness(target)
+        pushState()
+    }
+
+    /** 恢复：写回降前亮度，并复位计时 */
+    private fun restoreBrightness() {
+        cancelDimTimer()
+        if (originalBrightness >= 0) {
+            setBrightness(originalBrightness)
+            originalBrightness = -1
+        }
+        pushState()
+    }
+
+    private fun setBrightness(value: Int) {
+        if (!canWriteSettings()) return
+        try {
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, value)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun getCurrentBrightness(): Int =
+        try {
+            Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, 100)
+        } catch (_: Exception) {
+            100
+        }
+
+    private fun canWriteSettings(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.System.canWrite(this)
+        } else {
+            true
+        }
+
+    private fun saveDimPrefs() {
+        getSharedPreferences("keep_prefs", Context.MODE_PRIVATE).edit().apply {
+            putBoolean("dimEnabled", dimEnabled)
+            putInt("dimMinutes", dimMinutes)
+            apply()
+        }
     }
 
     // —————————————————————— 充电监听（由 PowerEventReceiver 驱动） ——————————————————————
@@ -242,6 +354,9 @@ class KeepScreenService : Service() {
         "targetPackage" to (targetPackage ?: ""),
         "timerMinutes" to timerMinutes,
         "remainingSeconds" to remainingSeconds(),
+        "dimEnabled" to dimEnabled,
+        "dimMinutes" to dimMinutes,
+        "dimmed" to (originalBrightness >= 0),
     )
 
     internal fun pushState() {

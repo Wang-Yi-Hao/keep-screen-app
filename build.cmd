@@ -1,7 +1,5 @@
-@echo off
-rem ============================================================
-rem  Double-click this file to build the app (no PowerShell typing needed).
-rem  It finds the .ps1 next to it and runs it with execution policy bypassed.
-rem ============================================================
-for %%f in ("%~dp0*.ps1") do powershell -NoProfile -ExecutionPolicy Bypass -File "%%~ff"
+﻿@echo off
+chcp 65001
+rem 默认执行真机/发布版构建脚本
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0一键构建（真机）.ps1"
 pause

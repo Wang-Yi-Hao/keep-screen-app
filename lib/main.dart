@@ -88,7 +88,7 @@ class _KeepScreenAppState extends State<KeepScreenApp> {
   }
 }
 
-/// 首次启动权限引导页：先授予必要权限（电池优化白名单等）再进入应用。
+/// 首次启动权限引导页：以“推荐/可选”方式展示权限，均可跳过，不授予也能进入应用。
 /// 也可从“设置”里再次打开。onEnter 为 null 时（从设置进入）以 pop 返回。
 class PermissionPage extends StatefulWidget {
   final VoidCallback? onEnter;
@@ -244,12 +244,12 @@ class _PermissionPageState extends State<PermissionPage>
                         fontWeight: FontWeight.bold,
                         color: Colors.white)),
                 const SizedBox(height: 6),
-                const Text('先授予以下权限，应用才能稳定保持屏幕常亮',
+                const Text('以下权限可提升常亮稳定性与扩展功能，均可跳过；不授予也能正常使用基础常亮，需要时可在设置中再开启',
                     style: TextStyle(color: Colors.white70, fontSize: 14)),
                 const SizedBox(height: 24),
                 _row(
                   icon: Icons.battery_charging_full,
-                  title: '电池优化白名单（必选）',
+                  title: '电池优化白名单（推荐）',
                   subtitle: '加入后前台服务不易被系统回收，常亮更可靠',
                   granted: _batteryOpt,
                   required_: true,
@@ -257,8 +257,8 @@ class _PermissionPageState extends State<PermissionPage>
                 ),
                 _row(
                   icon: Icons.layers,
-                  title: '悬浮窗权限（必选）',
-                  subtitle: '开启后 App 退到后台仍可保持常亮',
+                  title: '悬浮窗权限（推荐）',
+                  subtitle: '开启后 App 退到后台仍可保持常亮；不开启仅前台常亮',
                   granted: _overlay,
                   required_: true,
                   onTap: _openOverlay,
@@ -276,12 +276,10 @@ class _PermissionPageState extends State<PermissionPage>
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: (_batteryOpt && _overlay) ? _enter : null,
+                    onPressed: _enter,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF00F0FF),
                       foregroundColor: Colors.black,
-                      disabledBackgroundColor: Colors.white12,
-                      disabledForegroundColor: Colors.white38,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -291,15 +289,6 @@ class _PermissionPageState extends State<PermissionPage>
                             fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
-                const SizedBox(height: 12),
-                if (!_batteryOpt || !_overlay)
-                  Center(
-                    child: TextButton(
-                      onPressed: _enter,
-                      child: const Text('暂不设置，直接进入',
-                          style: TextStyle(color: Colors.white54)),
-                    ),
-                  ),
               ],
             ),
           ),
@@ -330,8 +319,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _timerMinutes = 0; // 0 = 关闭定时
   int _remainingSeconds = -1;
 
+  // —— 定时降低亮度（防烧屏）——
+  bool _dimEnabled = false;
+  int _dimMinutes = 5;
+  bool _dimmed = false;
+
   // —— UI 侧状态 ——
-  bool _needsOverlayPermission = false;
   String _targetAppName = '';
   String? _targetAppIcon; // 已选应用图标（base64），用于卡片展示
   bool _usageGranted = true;
@@ -396,6 +389,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _targetPackage = (data['targetPackage'] as String?) ?? '';
       _timerMinutes = _asInt(data['timerMinutes']);
       _remainingSeconds = _asInt(data['remainingSeconds']);
+      _dimEnabled = _asBool(data['dimEnabled']);
+      _dimMinutes = _clampDim(_asInt(data['dimMinutes']));
+      _dimmed = _asBool(data['dimmed']);
       if (_targetPackage.isNotEmpty && _targetAppName.isEmpty) {
         // 名称在选应用时记录，这里仅保留包名
       }
@@ -404,21 +400,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   bool _asBool(dynamic v) => v == true;
   int _asInt(dynamic v) => (v is int) ? v : -1;
+  int _clampDim(int v) => (v >= 1 && v <= 30) ? v : 5;
 
   // —— 命令封装 ——
   Future<void> _toggleManual() async {
     if (_manualOn) {
       await _channel.invokeMethod<void>('stop');
     } else {
-      // 悬浮窗为首次必选权限；若用户事后撤销，这里重新引导授予
+      // 悬浮窗权限仅影响“后台常亮”；不授予也能在前台保持常亮，故不再强制。
       final bool hasPerm =
           await _channel.invokeMethod<bool>('checkOverlayPermission') ?? false;
-      if (!hasPerm) {
-        await _channel.invokeMethod<void>('openOverlaySettings');
-        setState(() => _needsOverlayPermission = true);
-        return;
-      }
       await _channel.invokeMethod<void>('start');
+      if (!hasPerm && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('提示：未授予悬浮窗权限，App 退到后台将停止常亮'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
       // 手动开启后，若已选定时，立即按当前分钟数计时
       if (_timerMinutes > 0) {
         await _channel.invokeMethod<void>(
@@ -479,6 +479,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           'setTargetPackage', {'package': _targetPackage});
     }
   }
+
+  // —— 定时降低亮度（防烧屏）——
+
+  Future<void> _setDimMode(bool enabled, int minutes) async {
+    // 分钟数始终本地更新（下拉选择）；开关仅在确认生效后才点亮
+    setState(() => _dimMinutes = minutes);
+    if (!enabled) {
+      setState(() => _dimEnabled = false);
+    }
+    try {
+      final res = await _channel.invokeMethod<String>(
+          'setDimMode', {'enabled': enabled, 'minutes': minutes});
+      if (res == 'need_permission' && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('请在系统设置中允许“修改系统设置”，以启用防烧屏降亮度'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      } else if (res == 'ok' && enabled && mounted) {
+        setState(() => _dimEnabled = true);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _setDimEnabled(bool on) => _setDimMode(on, _dimMinutes);
+  Future<void> _setDimMinutes(int m) => _setDimMode(true, m);
 
   @override
   Widget build(BuildContext context) {
@@ -618,6 +645,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 _SettingsCard(
                   timerMinutes: _timerMinutes,
                   onTimer: _setTimer,
+                  dimEnabled: _dimEnabled,
+                  dimMinutes: _dimMinutes,
+                  onDimEnabled: _setDimEnabled,
+                  onDimMinutes: _setDimMinutes,
                   chargeMode: _chargeMode,
                   charging: _charging,
                   onChargeMode: _setChargeMode,
@@ -632,15 +663,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  _needsOverlayPermission
-                      ? '已打开设置，请允许“显示在其他应用上”后返回点击开关'
+                  _dimmed
+                      ? '已降低亮度以防烧屏 · 取消常亮或关闭开关即恢复'
                       : '常亮时注意电量与烧屏 · 用完即关',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 12,
-                    color: _needsOverlayPermission
-                        ? Colors.amberAccent
-                        : Colors.white38,
+                    color: Colors.white38,
                   ),
                 ),
               ],
@@ -673,6 +702,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 class _SettingsCard extends StatelessWidget {
   final int timerMinutes;
   final ValueChanged<int> onTimer;
+  final bool dimEnabled;
+  final int dimMinutes;
+  final ValueChanged<bool> onDimEnabled;
+  final ValueChanged<int> onDimMinutes;
   final bool chargeMode;
   final bool charging;
   final ValueChanged<bool> onChargeMode;
@@ -688,6 +721,10 @@ class _SettingsCard extends StatelessWidget {
   const _SettingsCard({
     required this.timerMinutes,
     required this.onTimer,
+    required this.dimEnabled,
+    required this.dimMinutes,
+    required this.onDimEnabled,
+    required this.onDimMinutes,
     required this.chargeMode,
     required this.charging,
     required this.onChargeMode,
@@ -830,6 +867,47 @@ class _SettingsCard extends StatelessWidget {
               child: Text(
                 '需授予“使用情况访问”权限才能检测前台 App，已为你打开设置页。',
                 style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+              ),
+            ),
+
+          const Divider(height: 24, color: Colors.white12),
+
+          // 定时降低亮度（防烧屏）
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('定时降低亮度（防烧屏）',
+                style: TextStyle(color: Colors.white)),
+            subtitle: const Text('常亮持续到点后自动调暗背光，关闭开关或取消常亮即恢复',
+                style: TextStyle(color: Colors.white38, fontSize: 12)),
+            value: dimEnabled,
+            activeColor: const Color(0xFF00F0FF),
+            onChanged: onDimEnabled,
+          ),
+          if (dimEnabled)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withOpacity(0.12)),
+                ),
+                child: DropdownButton<int>(
+                  value: dimMinutes,
+                  isExpanded: true,
+                  dropdownColor: const Color(0xFF10142A),
+                  underline: const SizedBox.shrink(),
+                  icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF00F0FF)),
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                  items: List.generate(30, (i) => i + 1)
+                      .map((m) => DropdownMenuItem<int>(
+                            value: m,
+                            child: Text('$m 分钟'),
+                          ))
+                      .toList(),
+                  onChanged: (v) => onDimMinutes(v ?? dimMinutes),
+                ),
               ),
             ),
 
