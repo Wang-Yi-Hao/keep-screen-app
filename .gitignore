@@ -11,11 +11,12 @@
 # —— Android ——
 .gradle/
 **/android/captures/
-**/android/gradlew
-**/android/gradlew.bat
+# 以下为构建必需，必须入库（保证克隆后可直接 flutter build apk）
+# **/android/gradlew
+# **/android/gradlew.bat
+# **/android/**/gradle-wrapper.jar
 **/android/local.properties
 **/android/key.properties
-**/android/**/gradle-wrapper.jar
 *.jks
 *.keystore
 
