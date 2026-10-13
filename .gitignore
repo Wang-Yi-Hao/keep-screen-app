@@ -28,3 +28,11 @@
 
 # —— 日志 ——
 *.log
+
+# —— 服务器私有部署相关（含服务器 IP / 路径 / SSH 信息，切勿公开）——
+# 真实的 version.json（含服务器地址与下载模板）只在本地保留，不上传仓库；
+# 仓库里只放 version.json.example 作为模板。
+version.json
+上传更新包到服务器.ps1
+DEPLOY-Lighthouse.md
+
