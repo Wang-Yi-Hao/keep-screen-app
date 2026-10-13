@@ -13,20 +13,40 @@ const String _channelName = 'com.keepscreen.app/keep';
 const String _eventName = 'com.keepscreen.app/events';
 
 /// 远程版本信息数据源列表：依次尝试，任一成功即用。
-/// 1. 自建轻量服务器（Lighthouse，广州）：最稳，国内直连、无 CDN 缓存；
-/// 2. GitHub Contents API：返回仓库文件的实时内容（不经过 CDN 缓存），
+///
+/// 安全说明：公共源码（GitHub）默认【不包含】任何自建服务器地址，
+/// 避免服务器信息随仓库泄露。需要走自建服务器时，通过构建参数注入：
+///   flutter build apk --dart-define=UPDATE_BASE_URL=http://你的服务器IP
+/// 未注入时，仅使用 GitHub 公开源（Contents API / jsDelivr / raw）。
+///
+/// 各源说明：
+///  - GitHub Contents API：返回仓库文件的实时内容（不经过 CDN 缓存），
 ///    响应为 base64，需单独解码（见 _fetchJson）；
-/// 3/4. jsDelivr CDN 镜像（国内可达，但有最长约 12 小时缓存）；
-/// 5. GitHub raw 原始地址（兜底）。
-/// 发布新版本时，把服务器上的 version.json 的 versionCode 改大即可触发更新提示
-/// （同时记得把服务器上的 APK 与仓库 version.json 一并更新）。
-const List<String> _updateInfoUrls = [
-  'http://106.53.120.233/version.json',
-  'https://api.github.com/repos/Wang-Yi-Hao/keep-screen-app/contents/version.json',
-  'https://cdn.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json',
-  'https://fastly.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json',
-  'https://raw.githubusercontent.com/Wang-Yi-Hao/keep-screen-app/main/version.json',
-];
+///  - jsDelivr CDN 镜像（国内可达，但有最长约 12 小时缓存）；
+///  - GitHub raw 原始地址（兜底）。
+/// 发布新版本时，把数据源里的 version.json 的 versionCode 改大即可触发更新提示。
+const String _updateBaseUrl =
+    String.fromEnvironment('UPDATE_BASE_URL', defaultValue: '');
+
+List<String> _buildUpdateInfoUrls() {
+  final urls = <String>[];
+  if (_updateBaseUrl.isNotEmpty) {
+    // 1. 自建轻量服务器（国内直连、无 CDN 缓存，最稳）
+    urls.add('$_updateBaseUrl/version.json');
+  }
+  // 2. GitHub Contents API：实时内容，需 base64 解码
+  urls.add(
+      'https://api.github.com/repos/Wang-Yi-Hao/keep-screen-app/contents/version.json');
+  // 3/4. jsDelivr CDN 镜像（国内可达，但有缓存）
+  urls.add(
+      'https://cdn.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json');
+  urls.add(
+      'https://fastly.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json');
+  // 5. GitHub raw 原始地址（兜底）
+  urls.add(
+      'https://raw.githubusercontent.com/Wang-Yi-Hao/keep-screen-app/main/version.json');
+  return urls;
+}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -554,10 +574,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _checkUpdate(silent: true);
   }
 
-  /// 依次尝试 _updateInfoUrls 中的地址（API 优先，镜像/raw 兜底），
+  /// 依次尝试数据源地址（API 优先，镜像/raw 兜底），
   /// 任一成功即返回 (版本信息, 数据源域名)；全部失败返回 null
   Future<(Map<String, dynamic>, String)?> _fetchUpdateInfo() async {
-    for (final url in _updateInfoUrls) {
+    final urls = _buildUpdateInfoUrls();
+    for (final url in urls) {
       final info = await _fetchJson(url);
       if (info != null) return (info, Uri.parse(url).host);
     }
@@ -714,10 +735,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     if (dlUrls.isEmpty) {
       // 没有可直接下载的地址，回退到浏览器打开发布页
-      _openUrl((info['url']?.toString() ?? _updateInfoUrls.last).trim());
+      _openUrl((info['url']?.toString() ?? _buildUpdateInfoUrls().last).trim());
       return;
     }
-    final fallbackUrl = (info['url']?.toString() ?? _updateInfoUrls.last).trim();
+    final fallbackUrl =
+        (info['url']?.toString() ?? _buildUpdateInfoUrls().last).trim();
     final remoteCode =
         info['versionCode'] is int ? info['versionCode'] as int : -1;
 

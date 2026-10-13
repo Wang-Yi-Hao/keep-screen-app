@@ -13,6 +13,20 @@ $ErrorActionPreference = "Continue"   # 不让单步错误直接杀掉窗口
 # 若需要包含全部架构的“胖包”（单文件、约 45MB、兼容性最好），把下面改为 $true。
 $BuildFatApk = $false
 
+# 自建更新服务器地址：仅通过 --dart-define 注入到本地构建的 APK 中，
+# 不会写进仓库源码（main.dart 用 String.fromEnvironment 读取）。
+# 为避免服务器信息随仓库泄露，此处默认留空（使用 GitHub 公开源）。
+# 需要走自建服务器时，在本脚本同目录新建 gitignore 的本地文件
+#   local-update-server.txt
+# 里面只写一行你的服务器地址，例如：
+#   http://你的服务器IP
+# 构建脚本会自动读取它并注入 APK；该文件已在 .gitignore 中，不会提交到 GitHub。
+$UpdateBaseUrl = ""
+$localCfg = Join-Path $PSScriptRoot "local-update-server.txt"
+if (Test-Path $localCfg) {
+    $UpdateBaseUrl = ([System.IO.File]::ReadAllText($localCfg)).Trim()
+}
+
 function Pause-Exit {
     param($msg)
     if ($msg) { Write-Host $msg -ForegroundColor Red }
@@ -153,13 +167,12 @@ try {
     if ($LASTEXITCODE -ne 0) { Pause-Exit "!!! flutter pub get 失败，见上方错误。"; exit 1 }
 
     # 8) 构建 Release APK
-    if ($BuildFatApk) {
-        Write-Host ">>> [5/6] flutter build apk --release（胖包：含全部 CPU 架构，单文件约 45MB）..." -ForegroundColor Cyan
-        & flutter build apk --release
-    } else {
-        Write-Host ">>> [5/6] flutter build apk --release --split-per-abi（拆分 ABI 小包：单包约 15MB）..." -ForegroundColor Cyan
-        & flutter build apk --release --split-per-abi
-    }
+    #    --dart-define=UPDATE_BASE_URL 把自建更新服务器地址编进 APK（仅本地生效，仓库源码不含此 IP）
+    $buildArgs = @("--release")
+    if (-not $BuildFatApk) { $buildArgs += "--split-per-abi" }
+    if ($UpdateBaseUrl) { $buildArgs += "--dart-define=UPDATE_BASE_URL=$UpdateBaseUrl" }
+    Write-Host ">>> [5/6] flutter build apk $(if ($BuildFatApk) { '（胖包：含全部 CPU 架构，单文件约 45MB）' } else { '（拆分 ABI 小包：单包约 15MB）' })..." -ForegroundColor Cyan
+    & flutter build apk @buildArgs
     if ($LASTEXITCODE -ne 0) { Pause-Exit "!!! flutter build apk 失败，见上方错误。常见：缺 Android SDK / JDK / 协议未接受，先跑 flutter doctor -v 排查。"; exit 1 }
 
     # 9) 复制产物到源码目录（APK 已被 .gitignore 忽略，不会误提交）

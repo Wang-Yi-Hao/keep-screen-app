@@ -234,14 +234,19 @@ App 内置「检查更新」：设置卡片底部「检查更新」可手动点�
 ### 托管与发布（推荐：自建轻量服务器，国内直连最稳）
 本项目将版本信息与安装包托管在自建轻量服务器（如腾讯云 Lighthouse）上：
 1. **`version.json` 与 APK 都放服务器**：
-   - 检查地址：`http://<服务器IP>/version.json`（已设为 App 的首选数据源）；
+   - 检查地址：`http://<服务器IP>/version.json`；
    - 安装包：`http://<服务器IP>/apks/keep-screen-{abi}-release.apk`，`{abi}` 为 arm64-v8a / armeabi-v7a / x86_64。
    - 记得在服务器安全组放行 80 端口（若用 HTTPS 则放行 443）。纯 HTTP 已通过 `android:usesCleartextTraffic` 放开。
-2. **数据源与下载源容灾**：App 的数据源列表（`lib/main.dart` 的 `_updateInfoUrls`）与下载模板（`downloadTemplates`）均为**多地址按序尝试**，首选你的服务器，其后依次是 GitHub Contents API、jsDelivr 镜像、GitHub raw 兜底——任一可达即用。
-3. **发布新版本时同步两处**：
+2. **服务器地址通过构建参数注入（不写死在源码，避免随仓库泄露）**：
+   - 仓库源码 `lib/main.dart` 用 `String.fromEnvironment('UPDATE_BASE_URL')` 读取更新服务器地址，**默认不含任何服务器 IP**。
+   - 本地构建自己的发布包时，由构建脚本 `一键构建（真机）.ps1` 从同目录的本地文件 `local-update-server.txt`（已 gitignore，不进仓库）读取地址并注入：
+     `flutter build apk --release --split-per-abi --dart-define=UPDATE_BASE_URL=http://<服务器IP>`
+   - 不传该参数时，App 仅使用 GitHub 公开源（Contents API / jsDelivr / raw），适合开源用户自行搭建托管。
+3. **数据源与下载源容灾**：App 的数据源列表（`lib/main.dart` 的 `_buildUpdateInfoUrls()`）与下载模板（`downloadTemplates`）均为**多地址按序尝试**——已注入服务器时首选它，其后依次是 GitHub Contents API、jsDelivr 镜像、GitHub raw 兜底；任一可达即用。下载地址来自 `version.json` 的 `downloadTemplates` 字段，因此服务器 `version.json` 指向自己的 `apks/`，开源用户则改为指向 GitHub Release。
+4. **发布新版本时同步**：
    - 改 `pubspec.yaml` 的 `version`（如 `1.1.0+2`，把 `+` 后的整数 `versionCode` 改大）；
-   - 把新 APK 传到服务器的 `apks/` 目录，并把服务器上的 `version.json` 的 `version` / `versionCode` / `notes` 改大（与 pubspec 的 `versionCode` 保持一致，比旧版大即可）。
-   - 仓库根目录的 `version.json` 也同步保留一份（与服务器内容一致），作为 GitHub 兜底的同源文件。
+   - 把新 APK 上传到服务器的 `apks/`（维护者可用本地 `上传更新包到服务器.ps1` 一键完成），并把服务器上的 `version.json` 的 `version` / `versionCode` / `notes` 改大（与 pubspec 的 `versionCode` 保持一致，比旧版大即可）。
+   - 仓库里**不存放**真实的 `version.json`（已计入 `.gitignore`，避免泄露服务器信息），只保留 `version.json.example` 作为模板供他人参考；维护者本地的真实 `version.json` 与服务器内容一致。
 
 ### `version.json` 字段说明
 | 字段 | 含义 |

@@ -35,4 +35,6 @@
 version.json
 上传更新包到服务器.ps1
 DEPLOY-Lighthouse.md
+# 本地构建时注入 APK 的服务器地址（构建脚本会读它；提交版不含任何 IP）
+local-update-server.txt
 
