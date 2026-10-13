@@ -683,18 +683,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   /// 应用内更新：下载对应架构的 APK 并显示进度，完成后调起系统安装器。
-  /// 若远程未提供 downloadTemplate / 无法解析本机架构，则回退到打开发布页。
+  /// 下载源按顺序尝试（GitHub Releases 资产 → jsDelivr 仓库镜像等），
+  /// 任一成功即用；若远程未提供下载模板 / 无法解析本机架构，则回退到打开发布页。
   Future<void> _startInAppUpdate(Map<String, dynamic> info) async {
     if (_downloading) return; // 下载进行中，忽略重复点击
-    final tmpl = info['downloadTemplate']?.toString();
-    String? dlUrl;
-    if (tmpl != null &&
-        tmpl.contains('{abi}') &&
-        _localAbi.isNotEmpty &&
-        _localAbi != 'unknown') {
-      dlUrl = tmpl.replaceAll('{abi}', _localAbi);
+    final hasAbi = _localAbi.isNotEmpty && _localAbi != 'unknown';
+    // 收集候选下载模板：downloadTemplates（列表，按序尝试）+ downloadTemplate（单个，向后兼容）
+    final templates = <String>[];
+    final list = info['downloadTemplates'];
+    if (list is List) {
+      for (final e in list) {
+        final s = e?.toString() ?? '';
+        if (s.isNotEmpty) templates.add(s);
+      }
     }
-    if (dlUrl == null) {
+    final single = info['downloadTemplate']?.toString() ?? '';
+    if (single.isNotEmpty && !templates.contains(single)) templates.add(single);
+
+    final dlUrls = <String>[];
+    for (final t in templates) {
+      if (!t.contains('{abi}')) continue;
+      if (!hasAbi) continue;
+      final u = t.replaceAll('{abi}', _localAbi);
+      if (!dlUrls.contains(u)) dlUrls.add(u);
+    }
+    if (dlUrls.isEmpty) {
       // 没有可直接下载的地址，回退到浏览器打开发布页
       _openUrl((info['url']?.toString() ?? _updateInfoUrls.last).trim());
       return;
@@ -712,7 +725,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final dir = await _channel.invokeMethod<String>('getApkDir');
       if (dir == null) throw Exception('无法获取下载目录');
       final filePath = '$dir/keep-screen-update.apk';
-      await _downloadApk(dlUrl, filePath, onProgress: (p) {
+      await _downloadApk(dlUrls, filePath, onProgress: (p) {
         if (mounted) setState(() => _downloadProgress = p);
       });
       if (_cancelDownload) return;
@@ -751,11 +764,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 流式下载 APK 到 filePath，回调 onProgress（0~1，或 -1 表示未知总大小）。
   /// 跟随重定向（GitHub Release 资产会 302 到对象存储）。
+  /// urls 按顺序尝试：连接失败 / 响应头超时 / 正文停滞超 20 秒 / 非 200，
+  /// 都会自动切换下一个源；全部失败才抛出最后一个错误。
   Future<void> _downloadApk(
-    String url,
+    List<String> urls,
     String filePath, {
     required void Function(double progress) onProgress,
   }) async {
+    Object? lastError;
+    for (final url in urls) {
+      try {
+        await _downloadFrom(url, filePath, onProgress);
+        return; // 下载成功
+      } catch (e) {
+        if (_cancelDownload) rethrow;
+        lastError = e; // 该源失败，尝试下一个
+      }
+    }
+    throw lastError ?? Exception('所有下载源均失败');
+  }
+
+  /// 从单个 url 下载 APK。响应头最长等 12 秒；正文超过 20 秒无数据视为停滞并抛错。
+  Future<void> _downloadFrom(
+    String url,
+    String filePath,
+    void Function(double progress) onProgress,
+  ) async {
     HttpClient? client;
     HttpClientResponse? resp;
     try {
@@ -766,7 +800,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         final req = await client
             .getUrl(uri)
             .timeout(const Duration(seconds: 10));
-        resp = await req.close().timeout(const Duration(seconds: 15));
+        resp = await req.close().timeout(const Duration(seconds: 12));
         if ((resp.statusCode == 301 ||
                 resp.statusCode == 302 ||
                 resp.statusCode == 303) &&
@@ -788,7 +822,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       await file.parent.create(recursive: true);
       final sink = file.openWrite();
       var received = 0;
-      await for (final chunk in resp) {
+      // 停滞检测：两次数据之间超过 20 秒即认为该源不通，抛错切换下一个源
+      final watched = resp.timeout(
+        const Duration(seconds: 20),
+        onTimeout: (sink) {
+          sink.addError(Exception('下载停滞（20 秒无数据）'));
+          sink.close();
+        },
+      );
+      await for (final chunk in watched) {
         if (_cancelDownload) {
           await sink.close();
           await file.delete();
