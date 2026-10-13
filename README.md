@@ -229,13 +229,12 @@ App 内置「检查更新」：设置卡片底部「检查更新」可手动点�
 - 有更新时弹窗展示新版本号与更新说明，点「立即更新」调起系统浏览器打开发布页 `url`，由用户下载安装新 APK。
 
 ### 你需要做两件事
-1. **托管 `version.json`**：把仓库根目录的 `version.json` 推到任意可公网访问的地址（推荐 GitHub Releases 资产或仓库 raw 文件）。
-   - 默认读取地址在 `lib/main.dart` 顶部的 `_updateInfoUrl` 常量，**请先改成你自己的仓库地址**：
-     ```dart
-     const String _updateInfoUrl =
-         'https://raw.githubusercontent.com/你的用户名/你的仓库/main/version.json';
-     ```
-   - 若放到 GitHub Releases，把 `version.json` 作为资产上传，再把 `_updateInfoUrl` 指向该资产的 raw 链接，并把 `version.json` 里的 `url` 填成发布页（如 `https://github.com/用户名/仓库/releases`）。
+1. **托管 `version.json`**：把仓库根目录的 `version.json` 推到仓库即可（App 默认已配置本仓库的读取地址）。
+   - 读取地址列表在 `lib/main.dart` 顶部的 `_updateInfoUrls` 常量：**jsDelivr 镜像优先（国内可达），GitHub raw 兜底**，依次尝试、任一成功即用。
+   - 若仓库默认分支不是 `main`，把列表里的 `@main` 和 `/main/` 改成实际分支名。
+   - 注意：jsDelivr 对分支文件有最长约 12 小时缓存；发版后想立即生效，可访问
+     `https://purge.jsdelivr.net/gh/用户名/仓库@main/version.json` 手动刷新缓存。
+   - 若放到 GitHub Releases，把 `version.json` 作为资产上传，再把地址列表指向该资产的链接，并把 `version.json` 里的 `url` 填成发布页（如 `https://github.com/用户名/仓库/releases`）。
 2. **发布新版本时同步两处**：
    - 改 `pubspec.yaml` 的 `version`（如 `1.1.0+2`，把 `+` 后的整数 `versionCode` 改大）；
    - 改 `version.json` 的 `version` / `versionCode` / `notes` / `url`，保证 `versionCode` 比旧版大且与 pubspec 一致。

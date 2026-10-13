@@ -12,11 +12,17 @@ import 'package:flutter/services.dart';
 const String _channelName = 'com.keepscreen.app/keep';
 const String _eventName = 'com.keepscreen.app/events';
 
-/// 远程版本信息文件地址（GitHub raw 或 Releases 资产页均可）。
-/// 发布新版本时，把本仓库的 version.json 推到该地址，并把 versionCode 改大即可触发更新提示。
-/// 若仓库默认分支是 master 而非 main，把下面链接里的 /main/ 改成 /master/。
-const String _updateInfoUrl =
-    'https://raw.githubusercontent.com/Wang-Yi-Hao/keep-screen-app/main/version.json';
+/// 远程版本信息文件地址列表：依次尝试，任一成功即用。
+/// 第 1 个是 jsDelivr CDN 镜像（国内可达，自动同步仓库 main 分支文件）；
+/// 第 2 个是 GitHub raw 原始地址（作兜底）。
+/// 发布新版本时，把仓库里的 version.json 的 versionCode 改大并推送即可触发更新提示。
+/// 提示：jsDelivr 对分支文件有最长约 12 小时缓存，发版后若想立即生效，
+/// 可访问 https://purge.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json 手动刷新缓存。
+const List<String> _updateInfoUrls = [
+  'https://cdn.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json',
+  'https://fastly.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json',
+  'https://raw.githubusercontent.com/Wang-Yi-Hao/keep-screen-app/main/version.json',
+];
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -340,6 +346,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   // —— 检查更新 ——
   String _localVersion = '1.0.0';
   int _localVersionCode = 1;
+  bool _checkingUpdate = false; // 手动检查更新进行中（显示加载动画）
 
   @override
   void initState() {
@@ -535,26 +542,37 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _checkUpdate(silent: true);
   }
 
-  /// 拉取远程 version.json；任何异常（无网/超时/解析失败）都返回 null
+  /// 依次尝试 _updateInfoUrls 中的地址（jsDelivr 优先，raw 兜底），
+  /// 任一成功即返回；全部失败返回 null
   Future<Map<String, dynamic>?> _fetchUpdateInfo() async {
+    for (final url in _updateInfoUrls) {
+      final info = await _fetchJson(url);
+      if (info != null) return info;
+    }
+    return null;
+  }
+
+  /// 拉取单个 URL 的 JSON；任何异常（无网/超时/解析失败）都返回 null
+  Future<Map<String, dynamic>?> _fetchJson(String urlStr) async {
     HttpClient? client;
     try {
       client = HttpClient();
-      // 加时间戳参数绕过 GitHub raw 的 CDN 缓存，确保拿到最新版本信息
-      final base = Uri.parse(_updateInfoUrl);
+      client.connectionTimeout = const Duration(seconds: 6);
+      // 加时间戳参数绕过 CDN 缓存，确保拿到最新版本信息
+      final base = Uri.parse(urlStr);
       final uri = base.replace(queryParameters: <String, String>{
         ...base.queryParameters,
         't': DateTime.now().millisecondsSinceEpoch.toString(),
       });
       final req = await client
           .getUrl(uri)
-          .timeout(const Duration(seconds: 8));
-      final resp = await req.close().timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 6));
+      final resp = await req.close().timeout(const Duration(seconds: 6));
       if (resp.statusCode != 200) return null;
       final body = await resp
           .transform(const Utf8Decoder())
           .join()
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 6));
       return jsonDecode(body) as Map<String, dynamic>;
     } catch (_) {
       return null;
@@ -563,27 +581,34 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// 检查更新：silent=true 时仅在有新版本时弹窗，最新/失败不打扰（用于启动自动检查）
+  /// 检查更新：silent=true 时仅在有新版本时弹窗，最新/失败不打扰（用于启动自动检查）；
+  /// 手动检查时显示加载动画，进行中不可重复点击
   Future<void> _checkUpdate({bool silent = false}) async {
-    final info = await _fetchUpdateInfo();
-    if (!mounted) return;
-    if (info == null) {
-      if (!silent) _toast('检查更新失败，请稍后重试');
-      return;
-    }
-    final remoteCode =
-        info['versionCode'] is int ? info['versionCode'] as int : -1;
-    if (remoteCode > _localVersionCode) {
-      _showUpdateDialog(info);
-    } else if (!silent) {
-      _toast('已是最新版本 (v$_localVersion)');
+    if (_checkingUpdate) return;
+    if (!silent) setState(() => _checkingUpdate = true);
+    try {
+      final info = await _fetchUpdateInfo();
+      if (!mounted) return;
+      if (info == null) {
+        if (!silent) _toast('检查更新失败，请稍后重试');
+        return;
+      }
+      final remoteCode =
+          info['versionCode'] is int ? info['versionCode'] as int : -1;
+      if (remoteCode > _localVersionCode) {
+        _showUpdateDialog(info);
+      } else if (!silent) {
+        _toast('已是最新版本 (v$_localVersion)');
+      }
+    } finally {
+      if (!silent && mounted) setState(() => _checkingUpdate = false);
     }
   }
 
   void _showUpdateDialog(Map<String, dynamic> info) {
     final version = (info['version']?.toString() ?? '').trim();
     final notes = (info['notes']?.toString() ?? '').trim();
-    final url = (info['url']?.toString() ?? _updateInfoUrl).trim();
+    final url = (info['url']?.toString() ?? _updateInfoUrls.last).trim();
     final mandatory = info['mandatory'] == true;
     showDialog(
       context: context,
@@ -803,6 +828,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   onOpenPermissions: _openPermissions,
                   onCheckUpdate: () => _checkUpdate(),
                   localVersion: _localVersion,
+                  checkingUpdate: _checkingUpdate,
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -862,6 +888,7 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onOpenPermissions;
   final VoidCallback onCheckUpdate;
   final String localVersion;
+  final bool checkingUpdate;
 
   const _SettingsCard({
     required this.timerMinutes,
@@ -883,6 +910,7 @@ class _SettingsCard extends StatelessWidget {
     required this.onOpenPermissions,
     required this.onCheckUpdate,
     required this.localVersion,
+    required this.checkingUpdate,
   });
 
   static const List<int> _timerOptions = [0, 5, 10, 30, 60];
@@ -1083,10 +1111,21 @@ class _SettingsCard extends StatelessWidget {
             leading: const Icon(Icons.system_update_alt,
                 color: Color(0xFF00F0FF), size: 22),
             title: const Text('检查更新', style: TextStyle(color: Colors.white)),
-            subtitle: Text('当前版本 v$localVersion',
-                style: const TextStyle(color: Colors.white38, fontSize: 12)),
-            trailing: const Icon(Icons.chevron_right, color: Colors.white38),
-            onTap: onCheckUpdate,
+            subtitle: Text(
+              checkingUpdate ? '正在检查更新…' : '当前版本 v$localVersion',
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
+            ),
+            trailing: checkingUpdate
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFF00F0FF),
+                    ),
+                  )
+                : const Icon(Icons.chevron_right, color: Colors.white38),
+            onTap: checkingUpdate ? null : onCheckUpdate,
           ),
         ],
       ),
