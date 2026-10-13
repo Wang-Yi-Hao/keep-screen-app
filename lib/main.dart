@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,12 @@ import 'package:flutter/services.dart';
 
 const String _channelName = 'com.keepscreen.app/keep';
 const String _eventName = 'com.keepscreen.app/events';
+
+/// 远程版本信息文件地址（GitHub raw 或 Releases 资产页均可）。
+/// 发布新版本时，把本仓库的 version.json 推到该地址，并把 versionCode 改大即可触发更新提示。
+/// 若仓库默认分支是 master 而非 main，把下面链接里的 /main/ 改成 /master/。
+const String _updateInfoUrl =
+    'https://raw.githubusercontent.com/Wang-Yi-Hao/keep-screen-app/main/version.json';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -330,12 +337,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _usageGranted = true;
   bool _pendingForegroundEnable = false; // 等待用户从设置授权后补开
 
+  // —— 检查更新 ——
+  String _localVersion = '1.0.0';
+  int _localVersionCode = 1;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _events.receiveBroadcastStream().listen(_onState);
     _loadInitialState();
+    _initVersion();
   }
 
   @override
@@ -507,6 +519,129 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _setDimEnabled(bool on) => _setDimMode(on, _dimMinutes);
   Future<void> _setDimMinutes(int m) => _setDimMode(true, m);
 
+  // —— 检查更新 ——
+
+  /// 取本机版本名/版本号，并在启动后静默检查一次（仅在有新版本时弹窗）
+  Future<void> _initVersion() async {
+    try {
+      final v =
+          await _channel.invokeMethod<Map<Object?, Object?>>('getAppVersion');
+      if (!mounted) return;
+      setState(() {
+        _localVersion = (v?['version'] as String?) ?? '1.0.0';
+        _localVersionCode = (v?['versionCode'] as int?) ?? 1;
+      });
+    } catch (_) {}
+    _checkUpdate(silent: true);
+  }
+
+  /// 拉取远程 version.json；任何异常（无网/超时/解析失败）都返回 null
+  Future<Map<String, dynamic>?> _fetchUpdateInfo() async {
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client
+          .getUrl(Uri.parse(_updateInfoUrl))
+          .timeout(const Duration(seconds: 8));
+      final resp = await req.close().timeout(const Duration(seconds: 8));
+      if (resp.statusCode != 200) return null;
+      final body = await resp
+          .transform(const Utf8Decoder())
+          .join()
+          .timeout(const Duration(seconds: 8));
+      return jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
+  /// 检查更新：silent=true 时仅在有新版本时弹窗，最新/失败不打扰（用于启动自动检查）
+  Future<void> _checkUpdate({bool silent = false}) async {
+    final info = await _fetchUpdateInfo();
+    if (!mounted) return;
+    if (info == null) {
+      if (!silent) _toast('检查更新失败，请稍后重试');
+      return;
+    }
+    final remoteCode =
+        info['versionCode'] is int ? info['versionCode'] as int : -1;
+    if (remoteCode > _localVersionCode) {
+      _showUpdateDialog(info);
+    } else if (!silent) {
+      _toast('已是最新版本 (v$_localVersion)');
+    }
+  }
+
+  void _showUpdateDialog(Map<String, dynamic> info) {
+    final version = (info['version']?.toString() ?? '').trim();
+    final notes = (info['notes']?.toString() ?? '').trim();
+    final url = (info['url']?.toString() ?? _updateInfoUrl).trim();
+    final mandatory = info['mandatory'] == true;
+    showDialog(
+      context: context,
+      barrierDismissible: !mandatory,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF10142A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: const Color(0xFF00F0FF).withOpacity(0.4)),
+        ),
+        title: Text(
+          '发现新版本${version.isNotEmpty ? ' v$version' : ''}',
+          style: const TextStyle(
+            color: Color(0xFF00F0FF),
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Text(
+            notes.isNotEmpty ? notes : '有可用更新，建议前往更新。',
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+        ),
+        actions: [
+          if (!mandatory)
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child:
+                  const Text('暂不', style: TextStyle(color: Colors.white38)),
+            ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _openUrl(url);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00F0FF),
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('立即更新',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openUrl(String url) async {
+    try {
+      await _channel.invokeMethod<void>('openBrowser', {'url': url});
+    } catch (_) {}
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final accent = _isOn ? const Color(0xFF00F0FF) : const Color(0xFF2A2F45);
@@ -660,6 +795,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   onForegroundMode: _setForegroundMode,
                   onPickApp: _pickApp,
                   onOpenPermissions: _openPermissions,
+                  onCheckUpdate: () => _checkUpdate(),
+                  localVersion: _localVersion,
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -717,6 +854,8 @@ class _SettingsCard extends StatelessWidget {
   final ValueChanged<bool> onForegroundMode;
   final VoidCallback onPickApp;
   final VoidCallback onOpenPermissions;
+  final VoidCallback onCheckUpdate;
+  final String localVersion;
 
   const _SettingsCard({
     required this.timerMinutes,
@@ -736,6 +875,8 @@ class _SettingsCard extends StatelessWidget {
     required this.onForegroundMode,
     required this.onPickApp,
     required this.onOpenPermissions,
+    required this.onCheckUpdate,
+    required this.localVersion,
   });
 
   static const List<int> _timerOptions = [0, 5, 10, 30, 60];
@@ -928,6 +1069,18 @@ class _SettingsCard extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+          const Divider(height: 24, color: Colors.white12),
+          const SizedBox(height: 4),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.system_update_alt,
+                color: Color(0xFF00F0FF), size: 22),
+            title: const Text('检查更新', style: TextStyle(color: Colors.white)),
+            subtitle: Text('当前版本 v$localVersion',
+                style: const TextStyle(color: Colors.white38, fontSize: 12)),
+            trailing: const Icon(Icons.chevron_right, color: Colors.white38),
+            onTap: onCheckUpdate,
           ),
         ],
       ),

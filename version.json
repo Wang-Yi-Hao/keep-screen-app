@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "versionCode": 1,
+  "notes": "当前为最新版本。\n发布新版本时：把 version 改成新版本名、versionCode 改成更大的整数，并在 url 填写你的发布页（如 GitHub Releases 页）；App 会以 versionCode 是否更大来判断“是否有更新”。",
+  "url": "https://github.com/Wang-Yi-Hao/keep-screen-app/releases",
+  "mandatory": false
+}

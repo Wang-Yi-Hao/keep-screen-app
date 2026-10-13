@@ -217,6 +217,42 @@ flutter run --release  # 编译并直接装到手机运行
 
 ---
 
+---
+
+## 九、检查更新功能（V3 新增）
+
+App 内置「检查更新」：设置卡片底部「检查更新」可手动点查；每次启动也会在后台静默检查一次，发现新版本才弹窗提醒（不影响正常使用）。
+
+### 工作原理
+- 本机版本号（`versionCode`）由原生 `getAppVersion` 读取，与 `pubspec.yaml` 的 `version: x.y.z+code` 中 `+` 后的 `code` 一致。
+- App 联网读取你托管的 `version.json`，比较其中的 `versionCode`：远程更大 → 判定有更新。
+- 有更新时弹窗展示新版本号与更新说明，点「立即更新」调起系统浏览器打开发布页 `url`，由用户下载安装新 APK。
+
+### 你需要做两件事
+1. **托管 `version.json`**：把仓库根目录的 `version.json` 推到任意可公网访问的地址（推荐 GitHub Releases 资产或仓库 raw 文件）。
+   - 默认读取地址在 `lib/main.dart` 顶部的 `_updateInfoUrl` 常量，**请先改成你自己的仓库地址**：
+     ```dart
+     const String _updateInfoUrl =
+         'https://raw.githubusercontent.com/你的用户名/你的仓库/main/version.json';
+     ```
+   - 若放到 GitHub Releases，把 `version.json` 作为资产上传，再把 `_updateInfoUrl` 指向该资产的 raw 链接，并把 `version.json` 里的 `url` 填成发布页（如 `https://github.com/用户名/仓库/releases`）。
+2. **发布新版本时同步两处**：
+   - 改 `pubspec.yaml` 的 `version`（如 `1.1.0+2`，把 `+` 后的整数 `versionCode` 改大）；
+   - 改 `version.json` 的 `version` / `versionCode` / `notes` / `url`，保证 `versionCode` 比旧版大且与 pubspec 一致。
+
+### `version.json` 字段说明
+| 字段 | 含义 |
+| --- | --- |
+| `version` | 展示用的版本名，如 `1.1.0` |
+| `versionCode` | 整数版本号，App 以此判断是否“有更新”（必须比旧版大） |
+| `notes` | 更新说明（弹窗内展示，可用 `\n` 换行） |
+| `url` | “立即更新”跳转的发布页地址 |
+| `mandatory` | `true` 时弹窗不可关闭（强制更新），默认 `false` |
+
+> 说明：本功能只做“检测 + 跳转发布页”，不内置下载安装；APK 分发与安装仍由用户在发布页完成（符合本工具“仅本地打包、不上架商店”的定位）。
+
+---
+
 ## 开源许可
 
 本项目基于 [MIT License](LICENSE) 开源，你可自由使用、修改和分发，需保留版权与许可声明。

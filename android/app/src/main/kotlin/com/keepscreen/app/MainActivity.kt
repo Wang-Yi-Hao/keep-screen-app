@@ -122,6 +122,39 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
 
+                    // —— 检查更新 ——
+                    /** 返回本机当前版本名与版本号（versionCode 为整数，用于和远程比较） */
+                    "getAppVersion" -> {
+                        @Suppress("DEPRECATION")
+                        val pInfo = packageManager.getPackageInfo(packageName, 0)
+                        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            pInfo.longVersionCode.toInt()
+                        } else {
+                            @Suppress("DEPRECATION")
+                            pInfo.versionCode
+                        }
+                        result.success(
+                            mapOf(
+                                "version" to (pInfo.versionName ?: "1.0.0"),
+                                "versionCode" to code,
+                            ),
+                        )
+                    }
+                    /** 调起系统浏览器打开指定 url（发现新版本后跳转发布页） */
+                    "openBrowser" -> {
+                        val url = call.argument<String>("url") ?: ""
+                        if (url.isNotEmpty()) {
+                            try {
+                                val intent =
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(intent)
+                            } catch (_: Exception) {
+                            }
+                        }
+                        result.success(true)
+                    }
+
                     else -> result.notImplemented()
                 }
             }

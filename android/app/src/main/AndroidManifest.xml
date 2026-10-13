@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 保持屏幕唤醒 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 检查更新：联网拉取版本信息（version.json） -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- 后台常亮用的透明悬浮窗（Android 10+ 需用户授权） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 引导加入电池优化白名单（降低前台服务被回收概率） -->
