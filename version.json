@@ -3,5 +3,6 @@
   "versionCode": 2,
   "notes": "这是一个测试版本，用于验证「检查更新」弹窗效果。正式发布时请把 version / versionCode 改成真实值。",
   "url": "https://github.com/Wang-Yi-Hao/keep-screen-app/releases",
-  "mandatory": false
+  "mandatory": false,
+  "downloadTemplate": "https://github.com/Wang-Yi-Hao/keep-screen-app/releases/download/v1.1.0/keep-screen-{abi}-release.apk"
 }

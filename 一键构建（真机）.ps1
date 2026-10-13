@@ -81,6 +81,13 @@ try {
     Copy-Item "$productDir\android\app\src\main\res\values\strings.xml"         "$projDir\android\app\src\main\res\values\strings.xml" -Force
     Copy-Item "$productDir\android\app\src\main\res\drawable\launch_background.xml" "$projDir\android\app\src\main\res\drawable\launch_background.xml" -Force
     Copy-Item "$productDir\android\app\src\main\res\drawable\ic_keep.xml"       "$projDir\android\app\src\main\res\drawable\ic_keep.xml" -Force
+    # 应用内更新所需的 FileProvider 路径配置（目录可能不存在，先创建）
+    $srcXml = "$productDir\android\app\src\main\res\xml\file_paths.xml"
+    $dstXmlDir = "$projDir\android\app\src\main\res\xml"
+    if (Test-Path $srcXml) {
+        if (-not (Test-Path $dstXmlDir)) { New-Item -ItemType Directory -Path $dstXmlDir -Force | Out-Null }
+        Copy-Item $srcXml "$dstXmlDir\file_paths.xml" -Force
+    }
 
     # 5.1) 同步 Gradle 工程配置（含 release 签名配置、国内镜像、wrapper 版本）
     Copy-Item "$productDir\android\build.gradle.kts"     "$projDir\android\build.gradle.kts" -Force
@@ -170,11 +177,13 @@ try {
         $apks = Get-ChildItem "$outDir\app-*-release.apk" -ErrorAction SilentlyContinue
         if ($apks -and $apks.Count -gt 0) {
             foreach ($a in $apks) {
-                $dstName = $a.Name -replace "^app-", "常亮小助手-"
+                # 改名 keep-screen-<abi>-release.apk：纯 ASCII 文件名，供 version.json 的下载模板直接引用
+                $dstName = $a.Name -replace "^app-", "keep-screen-"
                 Copy-Item $a.FullName "$productDir\$dstName" -Force
             }
-            Write-Host ">>> [6/6] 完成！拆分 APK 位于：$productDir\常亮小助手-<abi>-release.apk" -ForegroundColor Green
+            Write-Host ">>> [6/6] 完成！拆分 APK 位于：$productDir\keep-screen-<abi>-release.apk" -ForegroundColor Green
             Write-Host "    按手机架构选择安装：arm64-v8a（主流机型）/ armeabi-v7a（老旧设备）/ x86_64（模拟器）" -ForegroundColor White
+            Write-Host "    发版时把这 3 个 APK 作为资产上传到 GitHub Release（tag 与 versionCode 对应），并在 version.json 填写下载模板。" -ForegroundColor White
         } else {
             Pause-Exit "!!! 未找到拆分 APK，构建可能失败，请查看上方错误。"
             exit 1

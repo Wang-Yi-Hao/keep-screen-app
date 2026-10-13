@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 检查更新：联网拉取版本信息（version.json） -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 应用内下载并安装更新（Android 8.0+ 还需用户在设置中允许“安装未知应用”） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 后台常亮用的透明悬浮窗（Android 10+ 需用户授权） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 引导加入电池优化白名单（降低前台服务被回收概率） -->
@@ -69,5 +71,15 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- 应用内安装更新：通过 FileProvider 把下载的 APK 暴露给系统安装器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

@@ -224,11 +224,13 @@ flutter run --release  # 编译并直接装到手机运行
 App 内置「检查更新」：设置卡片底部「检查更新」可手动点查；每次启动也会在后台静默检查一次，发现新版本才弹窗提醒（不影响正常使用）。
 
 ### 工作原理
-- 本机版本号（`versionCode`）由原生 `getAppVersion` 读取，与 `pubspec.yaml` 的 `version: x.y.z+code` 中 `+` 后的 `code` 一致。
+- 本机版本号（`versionCode`）由原生 `getAppVersion` 读取，与 `pubspec.yaml` 的 `version: x.y.z+code` 中 `+` 后的 `code` 一致（已自动扣除拆分 ABI 打包加的 1000×ABI 偏移）。
 - App 联网读取你托管的 `version.json`，比较其中的 `versionCode`：远程更大 → 判定有更新。
-- 有更新时弹窗展示新版本号与更新说明，点「立即更新」调起系统浏览器打开发布页 `url`，由用户下载安装新 APK。
+- 有更新时弹窗展示新版本号与更新说明，点「立即更新」**直接在应用内下载对应架构的 APK 并显示进度条**，下载完成后自动调起系统安装器安装（无需离开 App 去浏览器下载）。
+  - 若远程未提供 `downloadTemplate`（或无法识别本机架构），则回退为打开浏览器跳转到 `url` 发布页，由用户手动下载。
+  - Android 8.0+ 首次安装未知来源应用需在系统设置中允许本 App“安装未知应用”，App 会自动引导你到该设置项。
 
-### 你需要做两件事
+### 你需要做三件事
 1. **托管 `version.json`**：把仓库根目录的 `version.json` 推到仓库即可（App 默认已配置本仓库的读取地址）。
    - 读取数据源列表在 `lib/main.dart` 顶部的 `_updateInfoUrls` 常量，依次尝试、任一成功即用：
      1. **GitHub Contents API**（返回实时内容，无 CDN 缓存问题，最可靠）；
@@ -238,10 +240,10 @@ App 内置「检查更新」：设置卡片底部「检查更新」可手动点�
    - 若仓库默认分支不是 `main`，把列表里的 `@main` 和 `/main/` 改成实际分支名。
    - 注意：jsDelivr 对分支文件有最长约 12 小时缓存；发版后想立即生效，可访问
      `https://purge.jsdelivr.net/gh/用户名/仓库@main/version.json` 手动刷新缓存。
-   - 若放到 GitHub Releases，把 `version.json` 作为资产上传，再把地址列表指向该资产的链接，并把 `version.json` 里的 `url` 填成发布页（如 `https://github.com/用户名/仓库/releases`）。
-2. **发布新版本时同步两处**：
+2. **发布 APK 到 GitHub Releases**：用「一键构建（真机）.ps1」构建，产物为 `keep-screen-<架构>-release.apk`（纯 ASCII 文件名，供下载模板直接引用）。在 GitHub 上创建 Release（**tag 务必与下载模板里的版本号一致**，如 `v1.1.0`），把三个架构的 APK 一并上传为资产。
+3. **发布新版本时同步两处**：
    - 改 `pubspec.yaml` 的 `version`（如 `1.1.0+2`，把 `+` 后的整数 `versionCode` 改大）；
-   - 改 `version.json` 的 `version` / `versionCode` / `notes` / `url`，保证 `versionCode` 比旧版大且与 pubspec 一致。
+   - 改 `version.json` 的 `version` / `versionCode` / `notes` / `downloadTemplate`（`{abi}` 会自动替换成设备架构，如 `arm64-v8a`），保证 `versionCode` 比旧版大且一致。
 
 ### `version.json` 字段说明
 | 字段 | 含义 |
@@ -249,10 +251,11 @@ App 内置「检查更新」：设置卡片底部「检查更新」可手动点�
 | `version` | 展示用的版本名，如 `1.1.0` |
 | `versionCode` | 整数版本号，App 以此判断是否“有更新”（必须比旧版大） |
 | `notes` | 更新说明（弹窗内展示，可用 `\n` 换行） |
-| `url` | “立即更新”跳转的发布页地址 |
-| `mandatory` | `true` 时弹窗不可关闭（强制更新），默认 `false` |
+| `url` | 回退用的发布页地址（无 `downloadTemplate` 或下载失败时打开） |
+| `downloadTemplate` | 应用内下载地址模板，其中 `{abi}` 会被替换成设备架构（arm64-v8a / armeabi-v7a / x86_64）；缺失则回退打开 `url` |
+| `mandatory` | `true` 时弹窗不可关闭（强制更新，且下载不可取消），默认 `false` |
 
-> 说明：本功能只做“检测 + 跳转发布页”，不内置下载安装；APK 分发与安装仍由用户在发布页完成（符合本工具“仅本地打包、不上架商店”的定位）。
+> 说明：本功能支持“检测 + 应用内下载安装”；APK 分发仍由你自己打包并上传到 GitHub Releases（符合本工具“仅本地打包、不上架商店”的定位）。
 
 ---
 

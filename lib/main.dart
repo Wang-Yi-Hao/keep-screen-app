@@ -347,7 +347,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   // —— 检查更新 ——
   String _localVersion = '1.0.0';
   int _localVersionCode = 1;
+  String _localAbi = ''; // 设备主 ABI（如 arm64-v8a），用于按架构下载 APK
   bool _checkingUpdate = false; // 手动检查更新进行中（显示加载动画）
+  bool _downloading = false; // 应用内下载更新进行中
+  bool _cancelDownload = false; // 用户取消下载
+  double _downloadProgress = 0; // 下载进度 0~1；-1 表示未知总大小（不确定进度）
+  bool _downloadDialogOpen = false; // 进度弹窗是否仍打开（防止重复 pop）
 
   @override
   void initState() {
@@ -538,6 +543,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       setState(() {
         _localVersion = (v?['version'] as String?) ?? '1.0.0';
         _localVersionCode = (v?['versionCode'] as int?) ?? 1;
+        _localAbi = (v?['abi'] as String?) ?? '';
       });
     } catch (_) {}
     _checkUpdate(silent: true);
@@ -609,8 +615,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (remoteCode > _localVersionCode) {
         _showUpdateDialog(info);
       } else if (!silent) {
-        // 调试提示：显示本地/远程 versionCode 与命中的数据源，便于定位
-        _toast('已是最新 (本地=$_localVersionCode 远程=$remoteCode 源=$source)');
+        _toast('已是最新版本 (v$_localVersion)');
       }
     } finally {
       if (!silent && mounted) setState(() => _checkingUpdate = false);
@@ -620,7 +625,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _showUpdateDialog(Map<String, dynamic> info) {
     final version = (info['version']?.toString() ?? '').trim();
     final notes = (info['notes']?.toString() ?? '').trim();
-    final url = (info['url']?.toString() ?? _updateInfoUrls.last).trim();
     final mandatory = info['mandatory'] == true;
     showDialog(
       context: context,
@@ -655,7 +659,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _openUrl(url);
+              _startInAppUpdate(info);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00F0FF),
@@ -676,6 +680,189 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     try {
       await _channel.invokeMethod<void>('openBrowser', {'url': url});
     } catch (_) {}
+  }
+
+  /// 应用内更新：下载对应架构的 APK 并显示进度，完成后调起系统安装器。
+  /// 若远程未提供 downloadTemplate / 无法解析本机架构，则回退到打开发布页。
+  Future<void> _startInAppUpdate(Map<String, dynamic> info) async {
+    final tmpl = info['downloadTemplate']?.toString();
+    String? dlUrl;
+    if (tmpl != null &&
+        tmpl.contains('{abi}') &&
+        _localAbi.isNotEmpty &&
+        _localAbi != 'unknown') {
+      dlUrl = tmpl.replaceAll('{abi}', _localAbi);
+    }
+    if (dlUrl == null) {
+      // 没有可直接下载的地址，回退到浏览器打开发布页
+      _openUrl((info['url']?.toString() ?? _updateInfoUrls.last).trim());
+      return;
+    }
+    final fallbackUrl = (info['url']?.toString() ?? _updateInfoUrls.last).trim();
+
+    setState(() {
+      _downloading = true;
+      _cancelDownload = false;
+      _downloadProgress = 0;
+    });
+    _downloadDialogOpen = true;
+    _showDownloadDialog(info['mandatory'] == true);
+    try {
+      final dir = await _channel.invokeMethod<String>('getApkDir');
+      if (dir == null) throw Exception('无法获取下载目录');
+      final filePath = '$dir/keep-screen-update.apk';
+      await _downloadApk(dlUrl!, filePath, onProgress: (p) {
+        if (mounted) setState(() => _downloadProgress = p);
+      });
+      if (_cancelDownload) return;
+      // 下载完成，调起系统安装器
+      final status =
+          await _channel.invokeMethod<String>('installApk', {'path': filePath});
+      if (status == 'need_permission') {
+        _toast('请先在系统设置中允许“安装未知应用”，再重试更新');
+      } else if (status == 'error') {
+        _toast('安装失败，已为你打开发布页手动下载');
+        _openUrl(fallbackUrl);
+      }
+    } catch (e) {
+      if (!_cancelDownload) {
+        _toast('下载失败，已为你打开发布页：${_shortErr(e)}');
+        _openUrl(fallbackUrl);
+      }
+    } finally {
+      if (mounted) {
+        // 关闭进度弹窗（若仍打开，避免取消后重复 pop）
+        if (_downloadDialogOpen) {
+          Navigator.of(context, rootNavigator: true).pop();
+          _downloadDialogOpen = false;
+        }
+        _downloading = false;
+        _downloadProgress = 0;
+        setState(() {});
+      }
+    }
+  }
+
+  String _shortErr(Object e) {
+    final s = e.toString();
+    return s.length > 60 ? '${s.substring(0, 60)}…' : s;
+  }
+
+  /// 流式下载 APK 到 filePath，回调 onProgress（0~1，或 -1 表示未知总大小）。
+  /// 跟随重定向（GitHub Release 资产会 302 到对象存储）。
+  Future<void> _downloadApk(
+    String url,
+    String filePath,
+    required void Function(double progress) onProgress,
+  ) async {
+    HttpClient? client;
+    HttpClientResponse? resp;
+    try {
+      client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 10);
+      Uri uri = Uri.parse(url);
+      for (var hop = 0; hop < 6; hop++) {
+        final req = await client
+            .getUrl(uri)
+            .timeout(const Duration(seconds: 10));
+        resp = await req.close().timeout(const Duration(seconds: 15));
+        if ((resp.statusCode == 301 ||
+                resp.statusCode == 302 ||
+                resp.statusCode == 303) &&
+            hop < 5) {
+          final loc = resp.headers.value(HttpHeaders.locationHeader);
+          await resp.drain();
+          if (loc == null) throw Exception('重定向缺少 Location');
+          uri = uri.resolve(loc);
+          continue;
+        }
+        if (resp.statusCode != 200) {
+          throw Exception('HTTP ${resp.statusCode}');
+        }
+        break;
+      }
+
+      final total = resp!.contentLength;
+      final file = File(filePath);
+      await file.parent.create(recursive: true);
+      final sink = file.openWrite();
+      var received = 0;
+      await for (final chunk in resp) {
+        if (_cancelDownload) {
+          await sink.close();
+          await file.delete();
+          return;
+        }
+        sink.add(chunk);
+        received += chunk.length;
+        if (total > 0) {
+          onProgress(received / total);
+        } else {
+          onProgress(-1); // 不确定进度
+        }
+      }
+      await sink.close();
+    } finally {
+      client?.close();
+    }
+  }
+
+  /// 下载进度弹窗：线性进度条 + 百分比 +（非强制时）取消按钮
+  void _showDownloadDialog(bool mandatory) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setInner) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF10142A),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(
+                  color: const Color(0xFF00F0FF).withOpacity(0.4)),
+            ),
+            title: const Text(
+              '正在更新',
+              style: TextStyle(
+                color: Color(0xFF00F0FF),
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(
+                  value: _downloadProgress < 0 ? null : _downloadProgress,
+                  backgroundColor: Colors.white12,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00F0FF)),
+                  minHeight: 8,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _downloadProgress < 0
+                      ? '正在下载更新包…'
+                      : '下载进度 ${(_downloadProgress * 100).toStringAsFixed(0)}%',
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ),
+            actions: [
+              if (!mandatory)
+                TextButton(
+                  onPressed: () {
+                    _cancelDownload = true;
+                    _downloadDialogOpen = false;
+                    Navigator.of(ctx).pop();
+                  },
+                  child: const Text('取消',
+                      style: TextStyle(color: Colors.white38)),
+                ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   void _toast(String msg) {

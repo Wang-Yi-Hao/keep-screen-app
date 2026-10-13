@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 应用内下载的更新 APK 所在目录（对应 getExternalFilesDir("updates")） -->
+    <external-files-path
+        name="updates"
+        path="updates" />
+</paths>

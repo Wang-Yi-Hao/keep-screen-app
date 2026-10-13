@@ -137,12 +137,72 @@ class MainActivity : FlutterActivity() {
                         // （编号仅 1~4），此处取模还原为与 pubspec.yaml 一致的逻辑 versionCode。
                         // 注意：基础 versionCode 需保持在 1000 以内（本应用远达不到）。
                         if (code >= 1000) code %= 1000
+                        // 设备主 ABI（如 arm64-v8a），供应用内更新按架构下载对应 APK
+                        val abi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"
+                        } else {
+                            @Suppress("DEPRECATION")
+                            Build.CPU_ABI ?: "unknown"
+                        }
                         result.success(
                             mapOf(
                                 "version" to (pInfo.versionName ?: "1.0.0"),
                                 "versionCode" to code,
+                                "abi" to abi,
                             ),
                         )
+                    }
+                    /** 返回应用专属外部存储目录（…/files/updates），用于存放下载的 APK */
+                    "getApkDir" -> {
+                        val dir = getExternalFilesDir("updates")
+                        dir?.mkdirs()
+                        result.success(dir?.absolutePath)
+                    }
+                    /** 调起系统安装器安装指定 APK（需 FileProvider 提供 content Uri）。
+                     *  返回：ok=已发起安装；need_permission=需先在设置中允许“安装未知应用”；error=失败 */
+                    "installApk" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        if (path.isEmpty()) {
+                            result.success("error")
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            val file = java.io.File(path)
+                            if (!file.exists()) {
+                                result.success("error")
+                                return@setMethodCallHandler
+                            }
+                            val uri = androidx.core.content.FileProvider
+                                .getUriForFile(this, "$packageName.fileprovider", file)
+                            // Android 8.0+ 安装未知来源应用需用户授权“安装未知应用”
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                !packageManager.canRequestPackageInstalls()
+                            ) {
+                                try {
+                                    startActivity(
+                                        Intent(
+                                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                            Uri.parse("package:$packageName"),
+                                        ),
+                                    )
+                                } catch (_: Exception) {
+                                }
+                                result.success("need_permission")
+                                return@setMethodCallHandler
+                            }
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(
+                                    uri,
+                                    "application/vnd.android.package-archive",
+                                )
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(intent)
+                            result.success("ok")
+                        } catch (e: Exception) {
+                            result.success("error")
+                        }
                     }
                     /** 调起系统浏览器打开指定 url（发现新版本后跳转发布页） */
                     "openBrowser" -> {
