@@ -134,19 +134,9 @@ class MainActivity : FlutterActivity() {
                             pInfo.versionCode
                         }
                         // Flutter split-per-abi 构建的 APK 会在 versionCode 上加 1000*ABI 编号
-                        // （armeabi-v7a=1 / arm64-v8a=2 / x86=3 / x86_64=4），此处减去偏移，
-                        // 返回与 pubspec.yaml 一致的逻辑 versionCode，保证更新检查比较正确。
-                        runCatching {
-                            val abiVer = when (pInfo.applicationInfo?.primaryCpuAbi) {
-                                "armeabi-v7a" -> 1L
-                                "arm64-v8a" -> 2L
-                                "x86" -> 3L
-                                "x86_64" -> 4L
-                                else -> 0L
-                            }
-                            val base = code - (abiVer * 1000).toInt()
-                            if (abiVer > 0 && base > 0) code = base
-                        }
+                        // （编号仅 1~4），此处取模还原为与 pubspec.yaml 一致的逻辑 versionCode。
+                        // 注意：基础 versionCode 需保持在 1000 以内（本应用远达不到）。
+                        if (code >= 1000) code %= 1000
                         result.success(
                             mapOf(
                                 "version" to (pInfo.versionName ?: "1.0.0"),
