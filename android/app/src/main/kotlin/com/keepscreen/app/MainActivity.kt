@@ -204,6 +204,33 @@ class MainActivity : FlutterActivity() {
                             result.success("error")
                         }
                     }
+                    /** 读取指定 APK 文件的 versionCode（用于判断本地已下载的安装包是否匹配新版本）。
+                     *  拆分包的 versionCode 同样按 1000*ABI 取模还原，与 getAppVersion 保持一致；
+                     *  文件不存在/损坏/解析失败返回 -1。 */
+                    "getApkVersionCode" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        if (path.isEmpty()) {
+                            result.success(-1)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            val info = packageManager.getPackageArchiveInfo(path, 0)
+                            if (info == null) {
+                                result.success(-1)
+                                return@setMethodCallHandler
+                            }
+                            var code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                info.longVersionCode.toInt()
+                            } else {
+                                @Suppress("DEPRECATION")
+                                info.versionCode
+                            }
+                            if (code >= 1000) code %= 1000
+                            result.success(code)
+                        } catch (_: Exception) {
+                            result.success(-1)
+                        }
+                    }
                     /** 调起系统浏览器打开指定 url（发现新版本后跳转发布页） */
                     "openBrowser" -> {
                         val url = call.argument<String>("url") ?: ""

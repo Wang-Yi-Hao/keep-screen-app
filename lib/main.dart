@@ -354,7 +354,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _checkingUpdate = false; // 手动检查更新进行中（显示加载动画）
   bool _downloading = false; // 应用内下载更新进行中
   bool _cancelDownload = false; // 用户取消下载
-  double _downloadProgress = 0; // 下载进度 0~1；-1 表示未知总大小（不确定进度）
+  // 下载进度 0~1；-1 表示未知总大小（不确定进度）。用 ValueNotifier 驱动弹窗重绘，
+  // 避免 StatefulBuilder 内 setState 不匹配导致进度条不刷新。
+  final ValueNotifier<double> _downloadProgress = ValueNotifier<double>(0);
   bool _downloadDialogOpen = false; // 进度弹窗是否仍打开（防止重复 pop）
 
   @override
@@ -716,23 +718,53 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return;
     }
     final fallbackUrl = (info['url']?.toString() ?? _updateInfoUrls.last).trim();
+    final remoteCode =
+        info['versionCode'] is int ? info['versionCode'] as int : -1;
 
     setState(() {
       _downloading = true;
       _cancelDownload = false;
-      _downloadProgress = 0;
+      _downloadProgress.value = 0;
     });
     _downloadDialogOpen = true;
-    _showDownloadDialog(info['mandatory'] == true);
+
     try {
       final dir = await _channel.invokeMethod<String>('getApkDir');
       if (dir == null) throw Exception('无法获取下载目录');
       final filePath = '$dir/keep-screen-update.apk';
-      await _downloadApk(dlUrls, filePath, onProgress: (p) {
-        if (mounted) setState(() => _downloadProgress = p);
-      });
-      if (_cancelDownload) return;
-      // 下载完成，调起系统安装器
+      final file = File(filePath);
+
+      // 检测本地是否已有匹配新版本的安装包：有则跳过下载、直接安装
+      var useLocal = false;
+      if (await file.exists()) {
+        final savedCode =
+            await _channel.invokeMethod<int>('getApkVersionCode', {
+              'path': filePath,
+            }) ??
+            -1;
+        if (savedCode >= remoteCode && savedCode > 0) {
+          useLocal = true;
+        } else {
+          // 旧版本或无效包，删掉重新下载
+          try {
+            await file.delete();
+          } catch (_) {}
+        }
+      }
+
+      _showDownloadDialog(info['mandatory'] == true, local: useLocal);
+
+      if (!useLocal) {
+        await _downloadApk(dlUrls, filePath, onProgress: (p) {
+          if (mounted) _downloadProgress.value = p;
+        });
+        if (_cancelDownload) return;
+      } else {
+        // 本地包直接安装：进度置为完成
+        _downloadProgress.value = 1;
+      }
+
+      // 下载完成（或复用本地包），调起系统安装器
       final status =
           await _channel.invokeMethod<String>('installApk', {'path': filePath});
       if (status == 'need_permission') {
@@ -754,7 +786,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _downloadDialogOpen = false;
         }
         _downloading = false;
-        _downloadProgress = 0;
+        _downloadProgress.value = 0;
         setState(() {});
       }
     }
@@ -853,13 +885,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// 下载进度弹窗：线性进度条 + 百分比 +（非强制时）取消按钮
-  void _showDownloadDialog(bool mandatory) {
+  /// 下载进度弹窗：线性进度条 + 百分比 +（非强制时）取消按钮。
+  /// 用 ValueListenableBuilder 监听 _downloadProgress，确保进度条随真实下载进度刷新。
+  /// [local] 为 true 时表示复用本地已下载的安装包（无需下载，直接安装）。
+  void _showDownloadDialog(bool mandatory, {bool local = false}) {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setInner) {
+      builder: (_) => ValueListenableBuilder<double>(
+        valueListenable: _downloadProgress,
+        builder: (ctx, progress, _) {
+          final indeterminate = progress < 0;
+          final percent = (progress * 100).toStringAsFixed(0);
+          final label = local
+              ? '正在安装本地安装包…'
+              : (indeterminate ? '正在下载更新包…' : '下载进度 $percent%');
           return AlertDialog(
             backgroundColor: const Color(0xFF10142A),
             shape: RoundedRectangleBorder(
@@ -879,22 +919,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               children: [
                 LinearProgressIndicator(
-                  value: _downloadProgress < 0 ? null : _downloadProgress,
+                  value: local || indeterminate ? null : progress,
                   backgroundColor: Colors.white12,
                   valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00F0FF)),
                   minHeight: 8,
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  _downloadProgress < 0
-                      ? '正在下载更新包…'
-                      : '下载进度 ${(_downloadProgress * 100).toStringAsFixed(0)}%',
+                  label,
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
               ],
             ),
             actions: [
-              if (!mandatory)
+              if (!mandatory && !local)
                 TextButton(
                   onPressed: () {
                     _cancelDownload = true;
