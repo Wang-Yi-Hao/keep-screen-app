@@ -22,8 +22,11 @@ $SshPort           = 22               # SSH 端口（被改过就改这里）
 $IdentityFile      = ""               # 私钥文件路径，如 "C:\Users\wyh17\.ssh\id_rsa"；
                                        # 留空则用密码登录（首次需手动输入密码）
 # 服务器目录（需与你的网站根目录对应；App 访问的是 http://IP/apks/ 与 http://IP/version.json）
-$RemoteApksDir     = "/usr/share/nginx/html/apks"        # 服务器上 APK 存放目录
-$RemoteVersionJson = "/usr/share/nginx/html/version.json" # 服务器上 version.json 路径
+# 本仓库的 Lighthouse 实例（广州）实际部署：Nginx 以 /var/www/keep-screen 为根目录、
+# 开启 autoindex，所以 APK 放 /var/www/keep-screen/apks、version.json 放 /var/www/keep-screen/version.json。
+# 若你以后改了服务器目录，改下面两行即可。
+$RemoteApksDir     = "/var/www/keep-screen/apks"        # 服务器上 APK 存放目录
+$RemoteVersionJson = "/var/www/keep-screen/version.json" # 服务器上 version.json 路径
 # 本地源
 $LocalDir          = $PSScriptRoot     # 本地 APK / version.json 所在目录（默认脚本同目录=项目根目录）
 $UploadVersionJson = $true             # 是否一并上传本地 version.json（让服务器版本信息同步更新）
