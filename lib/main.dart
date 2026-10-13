@@ -12,13 +12,14 @@ import 'package:flutter/services.dart';
 const String _channelName = 'com.keepscreen.app/keep';
 const String _eventName = 'com.keepscreen.app/events';
 
-/// 远程版本信息文件地址列表：依次尝试，任一成功即用。
-/// 第 1 个是 jsDelivr CDN 镜像（国内可达，自动同步仓库 main 分支文件）；
-/// 第 2 个是 GitHub raw 原始地址（作兜底）。
+/// 远程版本信息数据源列表：依次尝试，任一成功即用。
+/// 1. GitHub Contents API：返回仓库文件的实时内容（不经过 CDN 缓存，最可靠），
+///    响应为 base64，需单独解码（见 _fetchJson）；
+/// 2/3. jsDelivr CDN 镜像（国内可达，但有最长约 12 小时缓存）；
+/// 4. GitHub raw 原始地址（兜底）。
 /// 发布新版本时，把仓库里的 version.json 的 versionCode 改大并推送即可触发更新提示。
-/// 提示：jsDelivr 对分支文件有最长约 12 小时缓存，发版后若想立即生效，
-/// 可访问 https://purge.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json 手动刷新缓存。
 const List<String> _updateInfoUrls = [
+  'https://api.github.com/repos/Wang-Yi-Hao/keep-screen-app/contents/version.json',
   'https://cdn.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json',
   'https://fastly.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json',
   'https://raw.githubusercontent.com/Wang-Yi-Hao/keep-screen-app/main/version.json',
@@ -573,6 +574,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           .transform(const Utf8Decoder())
           .join()
           .timeout(const Duration(seconds: 6));
+      // GitHub Contents API 返回 base64 包装的文件内容，需先解码
+      if (base.host == 'api.github.com') {
+        final meta = jsonDecode(body) as Map<String, dynamic>;
+        final content = meta['content']?.toString() ?? '';
+        if (content.isEmpty) return null;
+        final decoded =
+            utf8.decode(base64Decode(content.replaceAll('\n', '')));
+        return jsonDecode(decoded) as Map<String, dynamic>;
+      }
       return jsonDecode(body) as Map<String, dynamic>;
     } catch (_) {
       return null;

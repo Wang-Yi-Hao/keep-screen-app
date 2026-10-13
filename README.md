@@ -230,7 +230,11 @@ App 内置「检查更新」：设置卡片底部「检查更新」可手动点�
 
 ### 你需要做两件事
 1. **托管 `version.json`**：把仓库根目录的 `version.json` 推到仓库即可（App 默认已配置本仓库的读取地址）。
-   - 读取地址列表在 `lib/main.dart` 顶部的 `_updateInfoUrls` 常量：**jsDelivr 镜像优先（国内可达），GitHub raw 兜底**，依次尝试、任一成功即用。
+   - 读取数据源列表在 `lib/main.dart` 顶部的 `_updateInfoUrls` 常量，依次尝试、任一成功即用：
+     1. **GitHub Contents API**（返回实时内容，无 CDN 缓存问题，最可靠）；
+     2. jsDelivr 主站镜像（国内可达，但有最长约 12 小时缓存）；
+     3. jsDelivr Fastly 镜像；
+     4. GitHub raw（兜底）。
    - 若仓库默认分支不是 `main`，把列表里的 `@main` 和 `/main/` 改成实际分支名。
    - 注意：jsDelivr 对分支文件有最长约 12 小时缓存；发版后想立即生效，可访问
      `https://purge.jsdelivr.net/gh/用户名/仓库@main/version.json` 手动刷新缓存。
