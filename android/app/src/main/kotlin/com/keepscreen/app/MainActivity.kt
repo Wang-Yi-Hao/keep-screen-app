@@ -127,11 +127,25 @@ class MainActivity : FlutterActivity() {
                     "getAppVersion" -> {
                         @Suppress("DEPRECATION")
                         val pInfo = packageManager.getPackageInfo(packageName, 0)
-                        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        var code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             pInfo.longVersionCode.toInt()
                         } else {
                             @Suppress("DEPRECATION")
                             pInfo.versionCode
+                        }
+                        // Flutter split-per-abi 构建的 APK 会在 versionCode 上加 1000*ABI 编号
+                        // （armeabi-v7a=1 / arm64-v8a=2 / x86=3 / x86_64=4），此处减去偏移，
+                        // 返回与 pubspec.yaml 一致的逻辑 versionCode，保证更新检查比较正确。
+                        runCatching {
+                            val abiVer = when (pInfo.applicationInfo?.primaryCpuAbi) {
+                                "armeabi-v7a" -> 1L
+                                "arm64-v8a" -> 2L
+                                "x86" -> 3L
+                                "x86_64" -> 4L
+                                else -> 0L
+                            }
+                            val base = code - (abiVer * 1000).toInt()
+                            if (abiVer > 0 && base > 0) code = base
                         }
                         result.success(
                             mapOf(
