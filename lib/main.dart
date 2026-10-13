@@ -13,12 +13,15 @@ const String _channelName = 'com.keepscreen.app/keep';
 const String _eventName = 'com.keepscreen.app/events';
 
 /// 远程版本信息数据源列表：依次尝试，任一成功即用。
-/// 1. GitHub Contents API：返回仓库文件的实时内容（不经过 CDN 缓存，最可靠），
+/// 1. 自建轻量服务器（Lighthouse，广州）：最稳，国内直连、无 CDN 缓存；
+/// 2. GitHub Contents API：返回仓库文件的实时内容（不经过 CDN 缓存），
 ///    响应为 base64，需单独解码（见 _fetchJson）；
-/// 2/3. jsDelivr CDN 镜像（国内可达，但有最长约 12 小时缓存）；
-/// 4. GitHub raw 原始地址（兜底）。
-/// 发布新版本时，把仓库里的 version.json 的 versionCode 改大并推送即可触发更新提示。
+/// 3/4. jsDelivr CDN 镜像（国内可达，但有最长约 12 小时缓存）；
+/// 5. GitHub raw 原始地址（兜底）。
+/// 发布新版本时，把服务器上的 version.json 的 versionCode 改大即可触发更新提示
+/// （同时记得把服务器上的 APK 与仓库 version.json 一并更新）。
 const List<String> _updateInfoUrls = [
+  'http://106.53.120.233/version.json',
   'https://api.github.com/repos/Wang-Yi-Hao/keep-screen-app/contents/version.json',
   'https://cdn.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json',
   'https://fastly.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/version.json',

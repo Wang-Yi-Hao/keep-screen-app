@@ -5,6 +5,7 @@
   "url": "https://github.com/Wang-Yi-Hao/keep-screen-app/releases",
   "mandatory": false,
   "downloadTemplates": [
+    "http://106.53.120.233/apks/keep-screen-{abi}-release.apk",
     "https://github.com/Wang-Yi-Hao/keep-screen-app/releases/download/v1.1.0/keep-screen-{abi}-release.apk",
     "https://cdn.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/apks/keep-screen-{abi}-release.apk",
     "https://fastly.jsdelivr.net/gh/Wang-Yi-Hao/keep-screen-app@main/apks/keep-screen-{abi}-release.apk"
