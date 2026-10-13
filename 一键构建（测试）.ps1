@@ -65,6 +65,10 @@ try {
     # 5) 用仓库源码覆盖（只覆盖作者文件，保留 Flutter 生成的 mipmap 图标与 MainApplication）
     Write-Host ">>> [2/5] 覆盖源码 ..." -ForegroundColor Cyan
     Copy-Item "$productDir\lib\main.dart" "$projDir\lib\main.dart" -Force
+    # pubspec.yaml 决定 APK 的 versionName/versionCode（经 flutter.versionName/Code 写入 gradle），
+    # 必须同步；否则 flutter create 生成的默认 1.0.0+1 会被打进包里，导致"改了版本号打包后仍显示 1.0.0"。
+    Copy-Item "$productDir\pubspec.yaml" "$projDir\pubspec.yaml" -Force
+    Write-Host "    已同步 pubspec.yaml（version=$((Select-String -Path "$projDir\pubspec.yaml" -Pattern '^version:\s*(\S+)').Matches.Groups[1].Value)）" -ForegroundColor DarkGray
     Copy-Item "$productDir\android\app\src\main\AndroidManifest.xml" "$projDir\android\app\src\main\AndroidManifest.xml" -Force
 
     $srcK = "$productDir\android\app\src\main\kotlin\com\keepscreen\app"

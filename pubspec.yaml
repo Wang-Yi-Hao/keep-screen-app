@@ -1,7 +1,7 @@
 name: keep_screen
 description: 常亮小助手 - 一键让安卓屏幕保持常亮（科技风）
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.2.0+3
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
