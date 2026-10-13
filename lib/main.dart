@@ -540,8 +540,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     HttpClient? client;
     try {
       client = HttpClient();
+      // 加时间戳参数绕过 GitHub raw 的 CDN 缓存，确保拿到最新版本信息
+      final base = Uri.parse(_updateInfoUrl);
+      final uri = base.replace(queryParameters: <String, String>{
+        ...base.queryParameters,
+        't': DateTime.now().millisecondsSinceEpoch.toString(),
+      });
       final req = await client
-          .getUrl(Uri.parse(_updateInfoUrl))
+          .getUrl(uri)
           .timeout(const Duration(seconds: 8));
       final resp = await req.close().timeout(const Duration(seconds: 8));
       if (resp.statusCode != 200) return null;
