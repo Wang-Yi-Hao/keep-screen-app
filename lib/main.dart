@@ -543,12 +543,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _checkUpdate(silent: true);
   }
 
-  /// 依次尝试 _updateInfoUrls 中的地址（jsDelivr 优先，raw 兜底），
-  /// 任一成功即返回；全部失败返回 null
-  Future<Map<String, dynamic>?> _fetchUpdateInfo() async {
+  /// 依次尝试 _updateInfoUrls 中的地址（API 优先，镜像/raw 兜底），
+  /// 任一成功即返回 (版本信息, 数据源域名)；全部失败返回 null
+  Future<(Map<String, dynamic>, String)?> _fetchUpdateInfo() async {
     for (final url in _updateInfoUrls) {
       final info = await _fetchJson(url);
-      if (info != null) return info;
+      if (info != null) return (info, Uri.parse(url).host);
     }
     return null;
   }
@@ -597,18 +597,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_checkingUpdate) return;
     if (!silent) setState(() => _checkingUpdate = true);
     try {
-      final info = await _fetchUpdateInfo();
+      final result = await _fetchUpdateInfo();
       if (!mounted) return;
-      if (info == null) {
+      if (result == null) {
         if (!silent) _toast('检查更新失败，请稍后重试');
         return;
       }
+      final (info, source) = result;
       final remoteCode =
           info['versionCode'] is int ? info['versionCode'] as int : -1;
       if (remoteCode > _localVersionCode) {
         _showUpdateDialog(info);
       } else if (!silent) {
-        _toast('已是最新版本 (v$_localVersion)');
+        // 调试提示：显示本地/远程 versionCode 与命中的数据源，便于定位
+        _toast('已是最新 (本地=$_localVersionCode 远程=$remoteCode 源=$source)');
       }
     } finally {
       if (!silent && mounted) setState(() => _checkingUpdate = false);
