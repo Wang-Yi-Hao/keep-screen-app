@@ -685,6 +685,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 应用内更新：下载对应架构的 APK 并显示进度，完成后调起系统安装器。
   /// 若远程未提供 downloadTemplate / 无法解析本机架构，则回退到打开发布页。
   Future<void> _startInAppUpdate(Map<String, dynamic> info) async {
+    if (_downloading) return; // 下载进行中，忽略重复点击
     final tmpl = info['downloadTemplate']?.toString();
     String? dlUrl;
     if (tmpl != null &&
@@ -711,7 +712,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final dir = await _channel.invokeMethod<String>('getApkDir');
       if (dir == null) throw Exception('无法获取下载目录');
       final filePath = '$dir/keep-screen-update.apk';
-      await _downloadApk(dlUrl!, filePath, onProgress: (p) {
+      await _downloadApk(dlUrl, filePath, onProgress: (p) {
         if (mounted) setState(() => _downloadProgress = p);
       });
       if (_cancelDownload) return;
@@ -752,9 +753,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 跟随重定向（GitHub Release 资产会 302 到对象存储）。
   Future<void> _downloadApk(
     String url,
-    String filePath,
+    String filePath, {
     required void Function(double progress) onProgress,
-  ) async {
+  }) async {
     HttpClient? client;
     HttpClientResponse? resp;
     try {
